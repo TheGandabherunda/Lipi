@@ -32,3 +32,4 @@ export const CanvasToast: React.FC = () => {
     </div>
   );
 };
+

@@ -85,7 +85,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
   const [hasActivePath, setHasActivePath] = useState<boolean>(false);
   const [isSpaceHeld, setIsSpaceHeld] = useState<boolean>(false);
 
-  // Context Menu state (Left-click on stroke selection or Right-click on canvas)
+  // Context Menu state (Right-click only)
   const [contextMenu, setContextMenu] = useState<{
     position: { x: number; y: number };
     selectedCount: number;
@@ -1390,25 +1390,18 @@ export const CanvasEditor: React.FC = React.memo(() => {
           useUIStore.getState().setStrokeColor(obj.stroke);
         }
       }
-
-      // Left-click on stroke: position context menu right by the selection
-      if (obj && canvas.upperCanvasEl) {
-        const rect = obj.getBoundingRect();
-        const canvasRect = canvas.upperCanvasEl.getBoundingClientRect();
-        const menuX = canvasRect.left + (rect.left + rect.width / 2);
-        const menuY = Math.max(70, canvasRect.top + rect.top - 55);
-        setContextMenu({
-          position: { x: menuX, y: menuY },
-          selectedCount: canvas.getActiveObjects().length,
-          strokeColor: (obj as any).stroke,
-          strokeWidth: (obj as any).strokeWidth,
-          isRightClick: false,
-        });
-      }
     };
 
     const handleCanvasContextMenu = (e: MouseEvent) => {
       e.preventDefault();
+      
+      // If user right-clicked an object that is not yet selected, select it
+      const target = canvas.findTarget(e as any) as any;
+      if (target && !canvas.getActiveObjects().includes(target)) {
+        canvas.setActiveObject(target);
+        canvas.requestRenderAll();
+      }
+
       const activeObjs = canvas.getActiveObjects();
       setContextMenu({
         position: { x: e.clientX, y: e.clientY },
@@ -1437,9 +1430,12 @@ export const CanvasEditor: React.FC = React.memo(() => {
     });
 
     canvas.on('mouse:down', (opt) => {
+      const eAny = opt.e as any;
+      if (eAny?.button === 0) {
+        setContextMenu(null);
+      }
       const tool = useUIStore.getState().activeTool;
       const curPenMode = useUIStore.getState().penMode;
-      const eAny = opt.e as any;
       const pointer =
         opt.scenePoint || (canvas as any).getScenePoint?.(opt.e) || { x: eAny?.offsetX ?? 0, y: eAny?.offsetY ?? 0 };
       isMouseDown = true;
@@ -2468,7 +2464,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
       {/* Global Quick Action Toast */}
       <CanvasToast />
 
-      {/* Floating & Desktop Context Menu (Triggered on stroke left-click or canvas right-click) */}
+      {/* Desktop Context Menu (Triggered strictly on right-click) */}
       {contextMenu && (
         <CanvasContextMenu
           position={contextMenu.position}
