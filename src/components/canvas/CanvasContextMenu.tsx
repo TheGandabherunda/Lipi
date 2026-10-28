@@ -60,15 +60,35 @@ export const CanvasContextMenu: React.FC<CanvasContextMenuProps> = ({
   const [letterSearch, setLetterSearch] = useState('');
   const menuRef = useRef<HTMLDivElement | null>(null);
 
-  // Close when clicking outside
+  // Close when clicking outside or pressing Escape
   useEffect(() => {
-    const handleOutsideClick = (e: MouseEvent) => {
+    let active = true;
+    const handleOutsideClick = (e: MouseEvent | PointerEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         onClose();
       }
     };
-    window.addEventListener('mousedown', handleOutsideClick);
-    return () => window.removeEventListener('mousedown', handleOutsideClick);
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    // Delay attaching click listener to next frame so the right-click event does not immediately dismiss the menu
+    const frameId = requestAnimationFrame(() => {
+      if (active) {
+        window.addEventListener('pointerdown', handleOutsideClick);
+        window.addEventListener('keydown', handleKeyDown);
+      }
+    });
+
+    return () => {
+      active = false;
+      cancelAnimationFrame(frameId);
+      window.removeEventListener('pointerdown', handleOutsideClick);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
   }, [onClose]);
 
   if (!position) return null;
@@ -84,6 +104,7 @@ export const CanvasContextMenu: React.FC<CanvasContextMenuProps> = ({
   return (
     <div
       ref={menuRef}
+      onContextMenu={(e) => e.preventDefault()}
       style={{
         left: `${Math.max(16, Math.min(window.innerWidth - 260, position.x))}px`,
         top: `${Math.max(64, Math.min(window.innerHeight - 340, position.y))}px`,

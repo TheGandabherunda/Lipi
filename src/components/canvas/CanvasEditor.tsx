@@ -1392,19 +1392,22 @@ export const CanvasEditor: React.FC = React.memo(() => {
       }
     };
 
-    const handleCanvasContextMenu = (e: MouseEvent) => {
-      e.preventDefault();
-      
-      // If user right-clicked an object that is not yet selected, select it
-      const target = canvas.findTarget(e as any) as any;
-      if (target && !canvas.getActiveObjects().includes(target)) {
-        canvas.setActiveObject(target);
-        canvas.requestRenderAll();
+    const openContextMenu = (clientX: number, clientY: number, targetObj?: any) => {
+      try {
+        const unwrapped = targetObj?.target || targetObj;
+        if (unwrapped && typeof unwrapped.setCoords === 'function') {
+          if (!canvas.getActiveObjects().includes(unwrapped)) {
+            canvas.setActiveObject(unwrapped);
+            canvas.requestRenderAll();
+          }
+        }
+      } catch (err) {
+        console.warn('Could not select right-clicked object', err);
       }
 
       const activeObjs = canvas.getActiveObjects();
       setContextMenu({
-        position: { x: e.clientX, y: e.clientY },
+        position: { x: clientX, y: clientY },
         selectedCount: activeObjs.length,
         strokeColor: (activeObjs[0] as any)?.stroke,
         strokeWidth: (activeObjs[0] as any)?.strokeWidth,
@@ -1412,16 +1415,38 @@ export const CanvasEditor: React.FC = React.memo(() => {
       });
     };
 
+    const handleFabricContextMenu = (opt: any) => {
+      const e = opt?.e as MouseEvent | undefined;
+      if (e) {
+        e.preventDefault();
+      }
+      const clientX = e?.clientX ?? (window.innerWidth / 2);
+      const clientY = e?.clientY ?? (window.innerHeight / 2);
+      openContextMenu(clientX, clientY, opt?.target);
+    };
+
+    const handleCanvasContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      let targetObj: any = null;
+      try {
+        const targetInfo = canvas.findTarget(e as any) as any;
+        targetObj = targetInfo?.target;
+      } catch {
+        targetObj = null;
+      }
+      openContextMenu(e.clientX, e.clientY, targetObj);
+    };
+
     const upperEl = canvas.upperCanvasEl;
     if (upperEl) {
       upperEl.addEventListener('contextmenu', handleCanvasContextMenu);
     }
+    canvas.on('contextmenu', handleFabricContextMenu);
 
     canvas.on('selection:created', onSelectionChanged);
     canvas.on('selection:updated', onSelectionChanged);
     canvas.on('selection:cleared', () => {
       useUIStore.getState().setSelectedObjectAngle(null);
-      setContextMenu(null);
     });
     canvas.on('object:rotating', updateAngle);
     canvas.on('object:modified', () => {
@@ -2005,6 +2030,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
     return () => {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
       if (upperEl) upperEl.removeEventListener('contextmenu', handleCanvasContextMenu);
+      canvas.off('contextmenu', handleFabricContextMenu);
       canvas.dispose();
       fabricCanvasRef.current = null;
     };
@@ -2492,6 +2518,18 @@ export const CanvasEditor: React.FC = React.memo(() => {
       {/* WORKSPACE & CANVAS AREA */}
       <div
         onMouseDown={handleWorkspaceMouseDown}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          const canvas = fabricCanvasRef.current;
+          const activeObjs = canvas ? canvas.getActiveObjects() : [];
+          setContextMenu({
+            position: { x: e.clientX, y: e.clientY },
+            selectedCount: activeObjs.length,
+            strokeColor: (activeObjs[0] as any)?.stroke,
+            strokeWidth: (activeObjs[0] as any)?.strokeWidth,
+            isRightClick: true,
+          });
+        }}
         className={clsx(
           "relative flex-1 w-full h-full flex items-center justify-center overflow-hidden p-8",
           (isSpaceHeld || activeTool === 'pan') && (isPanningRef.current ? "cursor-grabbing" : "cursor-grab")
