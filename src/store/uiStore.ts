@@ -48,6 +48,7 @@ interface UIStoreState {
   isExportModalOpen: boolean;
   isSettingsModalOpen: boolean;
   isHelpModalOpen: boolean;
+  isShortcutsModalOpen: boolean;
 
   // Global Quick Toast
   toastMessage: string | null;
@@ -85,6 +86,7 @@ interface UIStoreState {
   setExportModalOpen: (open: boolean) => void;
   setSettingsModalOpen: (open: boolean) => void;
   setHelpModalOpen: (open: boolean) => void;
+  setShortcutsModalOpen: (open: boolean) => void;
   showToast: (msg: string) => void;
   hideToast: () => void;
 }
@@ -140,6 +142,7 @@ export const useUIStore = create<UIStoreState>((set) => ({
   isExportModalOpen: false,
   isSettingsModalOpen: false,
   isHelpModalOpen: false,
+  isShortcutsModalOpen: false,
   toastMessage: null,
   showToast: (msg: string) => {
     set({ toastMessage: msg });
@@ -182,5 +185,6 @@ export const useUIStore = create<UIStoreState>((set) => ({
   setShowOnlyEdited: (showOnlyEdited) => set({ showOnlyEdited }),
   setExportModalOpen: (isExportModalOpen) => set({ isExportModalOpen }),
   setSettingsModalOpen: (isSettingsModalOpen) => set({ isSettingsModalOpen }),
-  setHelpModalOpen: (isHelpModalOpen) => set({ isHelpModalOpen }),
+  setHelpModalOpen: (isHelpModalOpen) => set({ isHelpModalOpen, isShortcutsModalOpen: isHelpModalOpen }),
+  setShortcutsModalOpen: (isShortcutsModalOpen) => set({ isShortcutsModalOpen, isHelpModalOpen: isShortcutsModalOpen }),
 }));

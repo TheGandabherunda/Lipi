@@ -13,6 +13,24 @@ export function useKeyboardShortcuts() {
 
       const isCtrlOrCmd = e.ctrlKey || e.metaKey;
 
+      // Keyboard Shortcuts Dialog: '?' or 'Ctrl+/' or 'Cmd+/'
+      if (
+        (e.key === '?' && !isCtrlOrCmd) ||
+        (isCtrlOrCmd && (e.key === '/' || e.code === 'Slash'))
+      ) {
+        e.preventDefault();
+        const current = useUIStore.getState().isShortcutsModalOpen;
+        useUIStore.getState().setShortcutsModalOpen(!current);
+        return;
+      }
+
+      // Close shortcuts modal on Escape if open
+      if (e.key === 'Escape' && useUIStore.getState().isShortcutsModalOpen) {
+        e.preventDefault();
+        useUIStore.getState().setShortcutsModalOpen(false);
+        return;
+      }
+
       // Undo: Ctrl+Z
       if (isCtrlOrCmd && e.key.toLowerCase() === 'z' && !e.shiftKey) {
         e.preventDefault();

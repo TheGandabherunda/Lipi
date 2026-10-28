@@ -6,6 +6,7 @@ import { RightSideGlyphGrid } from './components/glyph-grid/RightSideGlyphGrid';
 import { ExportModal } from './components/modals/ExportModal';
 import { ProjectSettingsModal } from './components/modals/ProjectSettingsModal';
 import { FontPreviewModal } from './components/modals/FontPreviewModal';
+import { KeyboardShortcutsModal } from './components/modals/KeyboardShortcutsModal';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 
 export const App: React.FC = () => {
@@ -38,6 +39,7 @@ export const App: React.FC = () => {
       <ExportModal />
       <ProjectSettingsModal />
       <FontPreviewModal isOpen={isPreviewOpen} onClose={() => setIsPreviewOpen(false)} />
+      <KeyboardShortcutsModal />
     </div>
   );
 };

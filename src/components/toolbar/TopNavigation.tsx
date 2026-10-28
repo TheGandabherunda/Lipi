@@ -13,6 +13,7 @@ import {
   RotateCw,
   BookOpen,
   Wand2,
+  Keyboard,
   X,
 } from 'lucide-react';
 import { clsx } from 'clsx';
@@ -42,6 +43,7 @@ export const TopNavigation: React.FC<TopNavigationProps> = ({ onOpenPreview }) =
   const selectedObjectAngle = useUIStore((s) => s.selectedObjectAngle);
   const setExportModalOpen = useUIStore((s) => s.setExportModalOpen);
   const setSettingsModalOpen = useUIStore((s) => s.setSettingsModalOpen);
+  const setShortcutsModalOpen = useUIStore((s) => s.setShortcutsModalOpen);
 
   // Close options dropdown when clicking outside
   useEffect(() => {
@@ -350,6 +352,23 @@ export const TopNavigation: React.FC<TopNavigationProps> = ({ onOpenPreview }) =
                 >
                   <Settings className="w-3.5 h-3.5 text-slate-500 shrink-0" />
                   <span>Typography Metrics & Settings</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShortcutsModalOpen(true);
+                    setIsOptionsOpen(false);
+                  }}
+                  className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors cursor-pointer text-left group"
+                >
+                  <span className="flex items-center gap-2">
+                    <Keyboard className="w-3.5 h-3.5 text-indigo-600 shrink-0 group-hover:scale-110 transition-transform" />
+                    <span>Keyboard Shortcuts</span>
+                  </span>
+                  <kbd className="text-[10px] text-slate-400 font-mono bg-slate-100 group-hover:bg-indigo-100 group-hover:text-indigo-700 px-1.5 py-0.5 rounded border border-slate-200">
+                    ?
+                  </kbd>
                 </button>
               </div>
 
