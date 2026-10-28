@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="kn">
+<head>
+  <meta charset="utf-8">
+  <title>Direct Noto Font Test</title>
+  <style>
+    @font-face {
+      font-family: 'TestDirectNoto';
+      src: url('/fonts/NotoSansKannada.ttf') format('truetype');
+      font-weight: 100 900;
+    }
+    .kannada-test {
+      font-family: 'TestDirectNoto', sans-serif;
+      font-size: 48px;
+      margin: 30px;
+      font-feature-settings: "knd2" 1, "blwf" 1, "akhn" 1, "rphf" 1, "abvs" 1, "blws" 1, "psts" 1, "haln" 1, "kern" 1;
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+    }
+  </style>
+</head>
+<body>
+  <div class="kannada-test">ಕನ್ನಡ ಲಿಪಿ ನುಡಿ • ಸಿರಿಗನ್ನಡಂ ಗೆಲ್ಗೆ</div>
+  <div class="kannada-test">ಅಕ್ಕ, ಅತ್ತೆ, ಅಣ್ಣ, ಅಪ್ಪ, ಅಮ್ಮ, ಶಕ್ತಿ, ವಿದ್ಯಾ, ಸೂರ್ಯ, ಕೃಷ್ಣ</div>
+</body>
+</html>
