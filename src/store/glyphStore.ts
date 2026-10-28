@@ -3,6 +3,14 @@ import type { GlyphData, VectorPathData } from '../types/glyph';
 import type { LipiFileSchema, LipiProjectMetadata } from '../types/lipiFormat';
 import { initialKannadaGlyphs } from '../constants/kannadaCharacters';
 import { useUIStore } from './uiStore';
+import { translateSVGPathString } from '../utils/svgExport';
+
+export interface GlyphClipboard {
+  paths: VectorPathData[];
+  sourceUnicode: string;
+  sourceCharacter: string;
+  copiedAt: number;
+}
 
 interface GlyphStoreState {
   // Project Metadata
@@ -10,6 +18,12 @@ interface GlyphStoreState {
   glyphs: Record<string, GlyphData>;
   weightProfiles: Record<number, Record<string, GlyphData>>;
   activeUnicode: string;
+
+  // Clipboard for copying and pasting strokes across any letter
+  clipboard: GlyphClipboard | null;
+  copyPaths: (paths?: VectorPathData[]) => void;
+  pastePaths: (targetUnicode?: string, offset?: { x: number; y: number }) => { count: number; sourceChar: string; targetChar: string } | null;
+  copyGlyphToTarget: (sourceUnicode: string, targetUnicode: string) => void;
 
   // Undo / Redo stacks for active glyph
   history: VectorPathData[][];
@@ -64,6 +78,118 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
   activeUnicode: 'U+0C85', // Default: 'ಅ'
   history: [[]],
   historyIndex: 0,
+  clipboard: null,
+
+  copyPaths: (paths?: VectorPathData[]) => {
+    const { activeUnicode, glyphs } = get();
+    const currentGlyph = glyphs[activeUnicode];
+    if (!currentGlyph) return;
+
+    const sourcePaths = (paths && paths.length > 0) ? paths : (currentGlyph.paths || []);
+    if (sourcePaths.length === 0) return;
+
+    // Deep clone paths so subsequent edits don't affect clipboard
+    const cloned: VectorPathData[] = sourcePaths.map((p) => ({
+      ...p,
+      id: `copy_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    }));
+
+    set({
+      clipboard: {
+        paths: cloned,
+        sourceUnicode: activeUnicode,
+        sourceCharacter: currentGlyph.character,
+        copiedAt: Date.now(),
+      },
+    });
+  },
+
+  pastePaths: (targetUnicode?: string, offset?: { x: number; y: number }) => {
+    const { clipboard, activeUnicode, glyphs } = get();
+    if (!clipboard || clipboard.paths.length === 0) return null;
+
+    const targetCode = targetUnicode || activeUnicode;
+    const targetGlyph = glyphs[targetCode];
+    if (!targetGlyph) return null;
+
+    const isSameGlyph = targetCode === clipboard.sourceUnicode;
+    const dx = offset?.x ?? (isSameGlyph ? 20 : 0);
+    const dy = offset?.y ?? (isSameGlyph ? 20 : 0);
+
+    const pastedPaths: VectorPathData[] = clipboard.paths.map((p, idx) => ({
+      ...p,
+      id: `pasted_${Date.now()}_${idx}`,
+      pathString: (dx !== 0 || dy !== 0) ? translateSVGPathString(p.pathString, dx, dy) : p.pathString,
+    }));
+
+    const newPaths = [...(targetGlyph.paths || []), ...pastedPaths];
+    const updatedGlyphs = {
+      ...glyphs,
+      [targetCode]: {
+        ...targetGlyph,
+        paths: newPaths,
+        isEdited: true,
+        lastModified: Date.now(),
+      },
+    };
+
+    if (targetCode === activeUnicode) {
+      const newHistory = get().history.slice(0, get().historyIndex + 1);
+      newHistory.push(newPaths);
+      if (newHistory.length > 50) newHistory.shift();
+
+      set({
+        glyphs: updatedGlyphs,
+        history: newHistory,
+        historyIndex: newHistory.length - 1,
+      });
+    } else {
+      set({ glyphs: updatedGlyphs });
+    }
+
+    return {
+      count: pastedPaths.length,
+      sourceChar: clipboard.sourceCharacter,
+      targetChar: targetGlyph.character,
+    };
+  },
+
+  copyGlyphToTarget: (sourceUnicode: string, targetUnicode: string) => {
+    const { glyphs, activeUnicode } = get();
+    const sourceGlyph = glyphs[sourceUnicode];
+    const targetGlyph = glyphs[targetUnicode];
+    if (!sourceGlyph || !targetGlyph || !sourceGlyph.paths || sourceGlyph.paths.length === 0) return;
+
+    const cloned = sourceGlyph.paths.map((p, idx) => ({
+      ...p,
+      id: `transferred_${Date.now()}_${idx}`,
+    }));
+
+    const newPaths = [...(targetGlyph.paths || []), ...cloned];
+    const updatedGlyphs = {
+      ...glyphs,
+      [targetUnicode]: {
+        ...targetGlyph,
+        paths: newPaths,
+        isEdited: true,
+        lastModified: Date.now(),
+      },
+    };
+
+    if (targetUnicode === activeUnicode) {
+      const newHistory = get().history.slice(0, get().historyIndex + 1);
+      newHistory.push(newPaths);
+      if (newHistory.length > 50) newHistory.shift();
+
+      set({
+        glyphs: updatedGlyphs,
+        history: newHistory,
+        historyIndex: newHistory.length - 1,
+      });
+    } else {
+      set({ glyphs: updatedGlyphs });
+    }
+  },
 
   setActiveUnicode: (unicode: string) => {
     const { glyphs } = get();

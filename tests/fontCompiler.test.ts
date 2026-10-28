@@ -61,3 +61,4 @@ describe('fontCompiler Latin Mapping', () => {
     expect(glyphA.name).not.toBe('uni0C85');
   });
 });
+

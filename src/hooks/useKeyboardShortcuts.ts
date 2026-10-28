@@ -37,6 +37,34 @@ export function useKeyboardShortcuts() {
         return;
       }
 
+      // Copy: Ctrl+C / Cmd+C
+      if (isCtrlOrCmd && e.key.toLowerCase() === 'c') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('lipi:canvas-copy'));
+        return;
+      }
+
+      // Paste: Ctrl+V / Cmd+V
+      if (isCtrlOrCmd && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('lipi:canvas-paste'));
+        return;
+      }
+
+      // Cut: Ctrl+X / Cmd+X
+      if (isCtrlOrCmd && e.key.toLowerCase() === 'x') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('lipi:canvas-cut'));
+        return;
+      }
+
+      // Duplicate: Ctrl+D / Cmd+D
+      if (isCtrlOrCmd && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('lipi:canvas-duplicate'));
+        return;
+      }
+
       // Canvas Zoom In: Ctrl + / Ctrl =
       if (isCtrlOrCmd && (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd')) {
         e.preventDefault();

@@ -17,6 +17,57 @@ export function fabricSegmentsToPathString(segments: any[]): string {
 }
 
 /**
+ * Offsets/translates all coordinates in an SVG path string by (dx, dy)
+ */
+export function translateSVGPathString(pathString: string, dx: number, dy: number): string {
+  if (!pathString || (dx === 0 && dy === 0)) return pathString;
+  try {
+    const res = pathString.replace(/([a-zA-Z])([^a-zA-Z]*)/g, (_, cmd, argsStr) => {
+      const numbers = (argsStr.trim().match(/-?[0-9]*\.?[0-9]+/g) || []).map(Number);
+      if (numbers.length === 0) return cmd + ' ';
+
+      const uppercaseCmd = cmd.toUpperCase();
+      if (uppercaseCmd === 'M' || uppercaseCmd === 'L' || uppercaseCmd === 'T') {
+        const shifted: number[] = [];
+        for (let i = 0; i < numbers.length; i += 2) {
+          shifted.push(Math.round((numbers[i] + dx) * 100) / 100);
+          if (i + 1 < numbers.length) {
+            shifted.push(Math.round((numbers[i + 1] + dy) * 100) / 100);
+          }
+        }
+        return cmd + ' ' + shifted.join(' ') + ' ';
+      }
+      if (uppercaseCmd === 'Q') {
+        const shifted: number[] = [];
+        for (let i = 0; i < numbers.length; i += 4) {
+          shifted.push(Math.round((numbers[i] + dx) * 100) / 100);
+          shifted.push(Math.round((numbers[i + 1] + dy) * 100) / 100);
+          if (i + 2 < numbers.length) shifted.push(Math.round((numbers[i + 2] + dx) * 100) / 100);
+          if (i + 3 < numbers.length) shifted.push(Math.round((numbers[i + 3] + dy) * 100) / 100);
+        }
+        return cmd + ' ' + shifted.join(' ') + ' ';
+      }
+      if (uppercaseCmd === 'C') {
+        const shifted: number[] = [];
+        for (let i = 0; i < numbers.length; i += 6) {
+          shifted.push(Math.round((numbers[i] + dx) * 100) / 100);
+          shifted.push(Math.round((numbers[i + 1] + dy) * 100) / 100);
+          if (i + 2 < numbers.length) shifted.push(Math.round((numbers[i + 2] + dx) * 100) / 100);
+          if (i + 3 < numbers.length) shifted.push(Math.round((numbers[i + 3] + dy) * 100) / 100);
+          if (i + 4 < numbers.length) shifted.push(Math.round((numbers[i + 4] + dx) * 100) / 100);
+          if (i + 5 < numbers.length) shifted.push(Math.round((numbers[i + 5] + dy) * 100) / 100);
+        }
+        return cmd + ' ' + shifted.join(' ') + ' ';
+      }
+      return cmd + ' ' + numbers.join(' ') + ' ';
+    });
+    return res.trim().replace(/\s+/g, ' ');
+  } catch {
+    return pathString;
+  }
+}
+
+/**
  * Generates an SVG string representation of a glyph for preview or export
  */
 export function glyphToSVG(

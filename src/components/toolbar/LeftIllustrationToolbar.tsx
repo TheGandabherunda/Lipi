@@ -13,6 +13,8 @@ import {
   Undo2,
   Redo2,
   Trash2,
+  Copy,
+  ClipboardPaste,
   Sparkles,
   Spline,
   Square,
@@ -75,6 +77,7 @@ export const LeftIllustrationToolbar: React.FC = () => {
   const canUndo = useGlyphStore((s) => s.canUndo());
   const canRedo = useGlyphStore((s) => s.canRedo());
   const clearActiveGlyph = useGlyphStore((s) => s.clearActiveGlyph);
+  const clipboard = useGlyphStore((s) => s.clipboard);
 
   const dispatchNodeAction = (action: string) => {
     window.dispatchEvent(new CustomEvent('lipi:node-action', { detail: { action } }));
@@ -230,6 +233,39 @@ export const LeftIllustrationToolbar: React.FC = () => {
             title="Redo (Ctrl+Y)"
           >
             <Redo2 className="w-4 h-4" />
+          </button>
+
+          {/* Copy Action */}
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent('lipi:canvas-copy'))}
+            className="w-9 h-9 rounded-xl flex items-center justify-center text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+            title="Copy Selected or All Strokes (Ctrl+C)"
+          >
+            <Copy className="w-4 h-4" />
+          </button>
+
+          {/* Paste Action */}
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent('lipi:canvas-paste'))}
+            disabled={!clipboard || clipboard.paths.length === 0}
+            className={clsx(
+              'w-9 h-9 rounded-xl flex items-center justify-center transition-colors relative cursor-pointer',
+              clipboard && clipboard.paths.length > 0
+                ? 'text-indigo-600 hover:bg-indigo-50 hover:text-indigo-700'
+                : 'text-slate-300 cursor-not-allowed'
+            )}
+            title={
+              clipboard && clipboard.paths.length > 0
+                ? `Paste ${clipboard.paths.length} stroke(s) from '${clipboard.sourceCharacter}' (Ctrl+V)`
+                : 'Paste (Ctrl+V) - Clipboard empty'
+            }
+          >
+            <ClipboardPaste className="w-4 h-4" />
+            {clipboard && clipboard.paths.length > 0 && (
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-indigo-600 ring-2 ring-white animate-pulse" />
+            )}
           </button>
 
           <button

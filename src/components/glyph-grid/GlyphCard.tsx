@@ -1,8 +1,9 @@
 import React, { useMemo } from 'react';
 import type { GlyphData } from '../../types/glyph';
 import { useUIStore } from '../../store/uiStore';
+import { useGlyphStore } from '../../store/glyphStore';
 import { clsx } from 'clsx';
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, ClipboardPaste } from 'lucide-react';
 import { KANNADA_VECTOR_OUTLINES } from '../../constants/kannadaVectorOutlines';
 
 interface GlyphCardProps {
@@ -17,6 +18,9 @@ export const GlyphCard: React.FC<GlyphCardProps> = React.memo(({ glyph, isActive
   }, [glyph.unicode, onSelect]);
 
   const activeOutlines = useUIStore((s) => s.activeOutlines);
+  const showToast = useUIStore((s) => s.showToast);
+  const clipboard = useGlyphStore((s) => s.clipboard);
+  const pastePaths = useGlyphStore((s) => s.pastePaths);
   const hasPaths = glyph.paths && glyph.paths.length > 0;
   const outline = activeOutlines[glyph.unicode] || KANNADA_VECTOR_OUTLINES[glyph.unicode];
 
@@ -130,6 +134,26 @@ export const GlyphCard: React.FC<GlyphCardProps> = React.memo(({ glyph, isActive
             <span>{glyph.paths.length} {glyph.paths.length === 1 ? 'stroke' : 'strokes'}</span>
           </span>
         </div>
+      )}
+
+      {/* Quick Paste Button on Hover if Clipboard has strokes */}
+      {clipboard && clipboard.paths.length > 0 && !isActive && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            const result = pastePaths(glyph.unicode, { x: 0, y: 0 });
+            onSelect(glyph.unicode);
+            if (result) {
+              showToast(`Pasted ${result.count} stroke(s) into '${result.targetChar}'!`);
+            }
+          }}
+          className="absolute bottom-2 right-2 z-20 px-2 py-0.5 rounded-lg bg-indigo-600 text-white text-[10px] font-bold opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 shadow-md hover:bg-indigo-700 cursor-pointer"
+          title={`Paste ${clipboard.paths.length} stroke(s) from '${clipboard.sourceCharacter}' into '${glyph.character}'`}
+        >
+          <ClipboardPaste className="w-3 h-3" />
+          <span>Paste</span>
+        </button>
       )}
     </div>
   );

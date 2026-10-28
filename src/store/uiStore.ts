@@ -49,6 +49,9 @@ interface UIStoreState {
   isSettingsModalOpen: boolean;
   isHelpModalOpen: boolean;
 
+  // Global Quick Toast
+  toastMessage: string | null;
+
   // Actions
   setActiveTool: (tool: CanvasTool) => void;
   setBrushTip: (tip: BrushTip) => void;
@@ -82,6 +85,8 @@ interface UIStoreState {
   setExportModalOpen: (open: boolean) => void;
   setSettingsModalOpen: (open: boolean) => void;
   setHelpModalOpen: (open: boolean) => void;
+  showToast: (msg: string) => void;
+  hideToast: () => void;
 }
 
 export const useUIStore = create<UIStoreState>((set) => ({
@@ -135,6 +140,11 @@ export const useUIStore = create<UIStoreState>((set) => ({
   isExportModalOpen: false,
   isSettingsModalOpen: false,
   isHelpModalOpen: false,
+  toastMessage: null,
+  showToast: (msg: string) => {
+    set({ toastMessage: msg });
+  },
+  hideToast: () => set({ toastMessage: null }),
 
   setActiveTool: (tool) => set({ activeTool: tool }),
   setBrushTip: (tip) => set({ brushTip: tip }),

@@ -3,7 +3,7 @@ import { Canvas, PencilBrush, Path, ActiveSelection, util, type FabricObject } f
 import { useGlyphStore } from '../../store/glyphStore';
 import { useUIStore } from '../../store/uiStore';
 import { calculateGuidelinePositions, renderCanvasGuidelines } from './CanvasGuidelines';
-import { fabricSegmentsToPathString } from '../../utils/svgExport';
+import { fabricSegmentsToPathString, translateSVGPathString } from '../../utils/svgExport';
 import type { VectorPathData } from '../../types/glyph';
 import {
   eraseStrokesAlongSegment,
@@ -35,6 +35,8 @@ import {
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { CanvasReferenceFontControl } from './CanvasReferenceFontControl';
+import { CanvasContextMenu } from './CanvasContextMenu';
+import { CanvasToast } from './CanvasToast';
 
 export const CanvasEditor: React.FC = React.memo(() => {
   const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
@@ -83,6 +85,15 @@ export const CanvasEditor: React.FC = React.memo(() => {
   const [hasActivePath, setHasActivePath] = useState<boolean>(false);
   const [isSpaceHeld, setIsSpaceHeld] = useState<boolean>(false);
 
+  // Context Menu state (Left-click on stroke selection or Right-click on canvas)
+  const [contextMenu, setContextMenu] = useState<{
+    position: { x: number; y: number };
+    selectedCount: number;
+    strokeColor?: string;
+    strokeWidth?: number;
+    isRightClick?: boolean;
+  } | null>(null);
+
   const isSpacePressedRef = useRef<boolean>(false);
   const isPanningRef = useRef<boolean>(false);
   const panStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -99,6 +110,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
   const currentGlyph = useGlyphStore((s) => s.glyphs[s.activeUnicode]);
   const metrics = useGlyphStore((s) => s.metadata.metrics);
   const updateActiveGlyphPaths = useGlyphStore((s) => s.updateActiveGlyphPaths);
+  const clipboard = useGlyphStore((s) => s.clipboard);
 
   const activeTool = useUIStore((s) => s.activeTool);
   const setActiveTool = useUIStore((s) => s.setActiveTool);
@@ -621,6 +633,67 @@ export const CanvasEditor: React.FC = React.memo(() => {
     }
   }, [activeTool, penMode, strokeColor, strokeWidth, strokeCap, strokeJoin, eraserSize]);
 
+  // Helper to serialize an individual Fabric object into a VectorPathData object
+  const serializeFabricPathObject = useCallback((obj: any, idx = 0): VectorPathData | null => {
+    if (!(obj instanceof Path) || !obj.path) return null;
+    const pathSegments = obj.path;
+    const mat = obj.calcTransformMatrix();
+    const offsetX = obj.pathOffset?.x ?? 0;
+    const offsetY = obj.pathOffset?.y ?? 0;
+
+    const hasTransform =
+      Math.abs((obj.left ?? 0) - offsetX) > 0.01 ||
+      Math.abs((obj.top ?? 0) - offsetY) > 0.01 ||
+      (obj.scaleX !== undefined && Math.abs(obj.scaleX - 1) > 0.001) ||
+      (obj.scaleY !== undefined && Math.abs(obj.scaleY - 1) > 0.001) ||
+      (obj.angle !== undefined && Math.abs(obj.angle) > 0.01) ||
+      obj.flipX ||
+      obj.flipY;
+
+    let finalSegments = pathSegments;
+    if (hasTransform) {
+      finalSegments = pathSegments.map((seg: any) => {
+        const cmd = seg[0];
+        if (cmd === 'M' || cmd === 'L') {
+          const pt = util.transformPoint({ x: seg[1] - offsetX, y: seg[2] - offsetY }, mat);
+          return [cmd, Math.round(pt.x * 10) / 10, Math.round(pt.y * 10) / 10];
+        } else if (cmd === 'C') {
+          const pt1 = util.transformPoint({ x: seg[1] - offsetX, y: seg[2] - offsetY }, mat);
+          const pt2 = util.transformPoint({ x: seg[3] - offsetX, y: seg[4] - offsetY }, mat);
+          const pt = util.transformPoint({ x: seg[5] - offsetX, y: seg[6] - offsetY }, mat);
+          return [
+            cmd,
+            Math.round(pt1.x * 10) / 10, Math.round(pt1.y * 10) / 10,
+            Math.round(pt2.x * 10) / 10, Math.round(pt2.y * 10) / 10,
+            Math.round(pt.x * 10) / 10, Math.round(pt.y * 10) / 10,
+          ];
+        } else if (cmd === 'Q') {
+          const pt1 = util.transformPoint({ x: seg[1] - offsetX, y: seg[2] - offsetY }, mat);
+          const pt = util.transformPoint({ x: seg[3] - offsetX, y: seg[4] - offsetY }, mat);
+          return [
+            cmd,
+            Math.round(pt1.x * 10) / 10, Math.round(pt1.y * 10) / 10,
+            Math.round(pt.x * 10) / 10, Math.round(pt.y * 10) / 10,
+          ];
+        }
+        return seg;
+      });
+    }
+
+    const pathStr = fabricSegmentsToPathString(finalSegments);
+    const objId = (obj as any).id || `path_${Date.now()}_${idx}`;
+    (obj as any).id = objId;
+    return {
+      id: objId,
+      pathString: pathStr,
+      strokeWidth: (obj.strokeWidth as number) || 16,
+      strokeColor: (obj.stroke as string) || '#0f172a',
+      fillColor: (obj.fill as string) || undefined,
+      strokeLineCap: (obj.strokeLineCap as any) || 'round',
+      strokeLineJoin: (obj.strokeLineJoin as any) || 'round',
+    };
+  }, []);
+
   // Serialize current fabric canvas paths into VectorPathData[]
   const serializeCanvasPaths = useCallback((): VectorPathData[] => {
     const canvas = fabricCanvasRef.current;
@@ -630,67 +703,12 @@ export const CanvasEditor: React.FC = React.memo(() => {
     const result: VectorPathData[] = [];
 
     objects.forEach((obj, idx) => {
-      if (obj instanceof Path && (obj as any).path) {
-        const pathSegments = (obj as any).path;
-        const mat = obj.calcTransformMatrix();
-        const offsetX = (obj.pathOffset?.x ?? 0);
-        const offsetY = (obj.pathOffset?.y ?? 0);
-
-        // If the object was moved, rotated, or scaled, apply transform to absolute canvas coords
-        const hasTransform =
-          Math.abs((obj.left ?? 0) - offsetX) > 0.01 ||
-          Math.abs((obj.top ?? 0) - offsetY) > 0.01 ||
-          (obj.scaleX !== undefined && Math.abs(obj.scaleX - 1) > 0.001) ||
-          (obj.scaleY !== undefined && Math.abs(obj.scaleY - 1) > 0.001) ||
-          (obj.angle !== undefined && Math.abs(obj.angle) > 0.01);
-
-        let finalSegments = pathSegments;
-        if (hasTransform) {
-          finalSegments = pathSegments.map((seg: any) => {
-            const cmd = seg[0];
-            if (cmd === 'M' || cmd === 'L') {
-              const pt = util.transformPoint({ x: seg[1] - offsetX, y: seg[2] - offsetY }, mat);
-              return [cmd, Math.round(pt.x * 10) / 10, Math.round(pt.y * 10) / 10];
-            } else if (cmd === 'C') {
-              const pt1 = util.transformPoint({ x: seg[1] - offsetX, y: seg[2] - offsetY }, mat);
-              const pt2 = util.transformPoint({ x: seg[3] - offsetX, y: seg[4] - offsetY }, mat);
-              const pt = util.transformPoint({ x: seg[5] - offsetX, y: seg[6] - offsetY }, mat);
-              return [
-                cmd,
-                Math.round(pt1.x * 10) / 10, Math.round(pt1.y * 10) / 10,
-                Math.round(pt2.x * 10) / 10, Math.round(pt2.y * 10) / 10,
-                Math.round(pt.x * 10) / 10, Math.round(pt.y * 10) / 10,
-              ];
-            } else if (cmd === 'Q') {
-              const pt1 = util.transformPoint({ x: seg[1] - offsetX, y: seg[2] - offsetY }, mat);
-              const pt = util.transformPoint({ x: seg[3] - offsetX, y: seg[4] - offsetY }, mat);
-              return [
-                cmd,
-                Math.round(pt1.x * 10) / 10, Math.round(pt1.y * 10) / 10,
-                Math.round(pt.x * 10) / 10, Math.round(pt.y * 10) / 10,
-              ];
-            }
-            return seg;
-          });
-        }
-
-        const pathStr = fabricSegmentsToPathString(finalSegments);
-        const objId = (obj as any).id || `path_${Date.now()}_${idx}`;
-        (obj as any).id = objId;
-        result.push({
-          id: objId,
-          pathString: pathStr,
-          strokeWidth: (obj.strokeWidth as number) || 16,
-          strokeColor: (obj.stroke as string) || '#0f172a',
-          fillColor: (obj.fill as string) || undefined,
-          strokeLineCap: (obj.strokeLineCap as any) || 'round',
-          strokeLineJoin: (obj.strokeLineJoin as any) || 'round',
-        });
-      }
+      const serialized = serializeFabricPathObject(obj, idx);
+      if (serialized) result.push(serialized);
     });
 
     return result;
-  }, []);
+  }, [serializeFabricPathObject]);
 
   // Debounced sync to store for 60fps drawing
   const syncToStoreDebounced = useCallback(() => {
@@ -921,6 +939,205 @@ export const CanvasEditor: React.FC = React.memo(() => {
     },
     [renderOverlay, syncToStoreDebounced]
   );
+
+  // 1. COPY ACTION
+  const handleCopy = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) return;
+
+    const activeObjs = canvas.getActiveObjects();
+    let pathsToCopy: VectorPathData[] = [];
+
+    if (activeObjs.length > 0) {
+      activeObjs.forEach((obj, idx) => {
+        const serialized = serializeFabricPathObject(obj, idx);
+        if (serialized) pathsToCopy.push(serialized);
+      });
+    } else {
+      pathsToCopy = currentGlyph?.paths ? [...currentGlyph.paths] : [];
+    }
+
+    if (pathsToCopy.length === 0) {
+      useUIStore.getState().showToast('No strokes to copy on this canvas.');
+      return;
+    }
+
+    useGlyphStore.getState().copyPaths(pathsToCopy);
+    useUIStore.getState().showToast(
+      `Copied ${pathsToCopy.length} stroke${pathsToCopy.length > 1 ? 's' : ''} from '${currentGlyph?.character || 'ಅ'}'. Switch to any letter and press Ctrl+V to paste!`
+    );
+  }, [currentGlyph, serializeFabricPathObject]);
+
+  // 2. PASTE ACTION
+  const handlePaste = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) return;
+    const clip = useGlyphStore.getState().clipboard;
+    if (!clip || clip.paths.length === 0) {
+      useUIStore.getState().showToast('Clipboard is empty! Copy strokes with Ctrl+C first.');
+      return;
+    }
+
+    const isSameGlyph = activeUnicode === clip.sourceUnicode;
+    const dx = isSameGlyph ? 24 : 0;
+    const dy = isSameGlyph ? 24 : 0;
+
+    const newlyAdded: FabricObject[] = [];
+    clip.paths.forEach((p, idx) => {
+      try {
+        const translatedStr = (dx !== 0 || dy !== 0) ? translateSVGPathString(p.pathString, dx, dy) : p.pathString;
+        const pathObj = new Path(translatedStr, {
+          stroke: p.fillColor ? undefined : (p.strokeColor || strokeColor),
+          strokeWidth: p.fillColor ? 0 : (p.strokeWidth || 16),
+          fill: p.fillColor || undefined,
+          strokeLineCap: p.strokeLineCap || 'round',
+          strokeLineJoin: p.strokeLineJoin || 'round',
+          selectable: activeTool === 'select',
+          evented: true,
+        });
+        (pathObj as any).id = `pasted_${Date.now()}_${idx}`;
+        canvas.add(pathObj);
+        newlyAdded.push(pathObj);
+      } catch (e) {
+        console.warn('Failed to paste path:', e);
+      }
+    });
+
+    if (newlyAdded.length > 0) {
+      canvas.discardActiveObject();
+      if (newlyAdded.length === 1) {
+        canvas.setActiveObject(newlyAdded[0]);
+      } else {
+        const sel = new ActiveSelection(newlyAdded, { canvas });
+        canvas.setActiveObject(sel);
+      }
+      canvas.requestRenderAll();
+      syncToStoreDebounced();
+
+      useUIStore.getState().showToast(
+        `Pasted ${newlyAdded.length} stroke${newlyAdded.length > 1 ? 's' : ''} from '${clip.sourceCharacter}' into '${currentGlyph?.character || 'ಅ'}'!`
+      );
+    }
+  }, [activeUnicode, currentGlyph, strokeColor, activeTool, syncToStoreDebounced]);
+
+  // 3. DUPLICATE ACTION
+  const handleDuplicate = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) return;
+    const activeObjs = canvas.getActiveObjects();
+    if (activeObjs.length === 0) return;
+
+    const newlyAdded: FabricObject[] = [];
+    activeObjs.forEach((obj, idx) => {
+      const serialized = serializeFabricPathObject(obj, idx);
+      if (serialized) {
+        const translated = translateSVGPathString(serialized.pathString, 20, 20);
+        const dupObj = new Path(translated, {
+          stroke: serialized.fillColor ? undefined : serialized.strokeColor,
+          strokeWidth: serialized.fillColor ? 0 : serialized.strokeWidth,
+          fill: serialized.fillColor,
+          strokeLineCap: serialized.strokeLineCap,
+          strokeLineJoin: serialized.strokeLineJoin,
+          selectable: true,
+          evented: true,
+        });
+        (dupObj as any).id = `dup_${Date.now()}_${idx}`;
+        canvas.add(dupObj);
+        newlyAdded.push(dupObj);
+      }
+    });
+
+    if (newlyAdded.length > 0) {
+      canvas.discardActiveObject();
+      if (newlyAdded.length === 1) {
+        canvas.setActiveObject(newlyAdded[0]);
+      } else {
+        const sel = new ActiveSelection(newlyAdded, { canvas });
+        canvas.setActiveObject(sel);
+      }
+      canvas.requestRenderAll();
+      syncToStoreDebounced();
+      useUIStore.getState().showToast(`Duplicated ${newlyAdded.length} stroke${newlyAdded.length > 1 ? 's' : ''}`);
+    }
+  }, [serializeFabricPathObject, syncToStoreDebounced]);
+
+  // 4. CUT ACTION
+  const handleCut = useCallback(() => {
+    handleCopy();
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) return;
+    const activeObjs = canvas.getActiveObjects();
+    activeObjs.forEach((obj) => canvas.remove(obj));
+    canvas.discardActiveObject();
+    canvas.requestRenderAll();
+    syncToStoreDebounced();
+    setContextMenu(null);
+  }, [handleCopy, syncToStoreDebounced]);
+
+  // 5. DELETE ACTION
+  const handleDelete = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) return;
+    const activeObjs = canvas.getActiveObjects();
+    if (activeObjs.length === 0) return;
+    activeObjs.forEach((obj) => canvas.remove(obj));
+    canvas.discardActiveObject();
+    canvas.requestRenderAll();
+    syncToStoreDebounced();
+    setContextMenu(null);
+    useUIStore.getState().showToast(`Deleted ${activeObjs.length} stroke${activeObjs.length > 1 ? 's' : ''}`);
+  }, [syncToStoreDebounced]);
+
+  // 6. FLIP X ACTION
+  const handleFlipX = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) return;
+    const activeObj = canvas.getActiveObject();
+    if (!activeObj) return;
+    activeObj.set('flipX', !activeObj.flipX);
+    activeObj.setCoords();
+    canvas.requestRenderAll();
+    syncToStoreDebounced();
+    useUIStore.getState().showToast('Flipped stroke horizontally');
+  }, [syncToStoreDebounced]);
+
+  // 7. FLIP Y ACTION
+  const handleFlipY = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) return;
+    const activeObj = canvas.getActiveObject();
+    if (!activeObj) return;
+    activeObj.set('flipY', !activeObj.flipY);
+    activeObj.setCoords();
+    canvas.requestRenderAll();
+    syncToStoreDebounced();
+    useUIStore.getState().showToast('Flipped stroke vertically');
+  }, [syncToStoreDebounced]);
+
+  // 8. COPY TO ANOTHER LETTER DIRECTLY
+  const handleCopyToLetter = useCallback((targetUnicode: string) => {
+    handleCopy();
+    const result = useGlyphStore.getState().pastePaths(targetUnicode, { x: 0, y: 0 });
+    if (result) {
+      useUIStore.getState().showToast(
+        `Copied stroke(s) into '${result.targetChar}'! Switching to '${result.targetChar}' canvas...`
+      );
+      useGlyphStore.getState().setActiveUnicode(targetUnicode);
+    }
+    setContextMenu(null);
+  }, [handleCopy]);
+
+  // 9. EDIT NODES
+  const handleEditNodes = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) return;
+    const activeObj = canvas.getActiveObject();
+    if (activeObj && activeObj instanceof Path) {
+      setActiveTool('direct-select');
+      loadPathForNodeEditing(activeObj);
+    }
+    setContextMenu(null);
+  }, [loadPathForNodeEditing, setActiveTool]);
 
   // Listen to toolbar node actions
   useEffect(() => {
@@ -1164,7 +1381,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
 
     const onSelectionChanged = (opt: any) => {
       updateAngle();
-      const obj = opt.selected?.[0];
+      const obj = opt.selected?.[0] || canvas.getActiveObject();
       if (obj && obj instanceof Path) {
         if (obj.strokeWidth !== undefined) {
           useUIStore.getState().setStrokeWidth(obj.strokeWidth as number);
@@ -1173,11 +1390,46 @@ export const CanvasEditor: React.FC = React.memo(() => {
           useUIStore.getState().setStrokeColor(obj.stroke);
         }
       }
+
+      // Left-click on stroke: position context menu right by the selection
+      if (obj && canvas.upperCanvasEl) {
+        const rect = obj.getBoundingRect();
+        const canvasRect = canvas.upperCanvasEl.getBoundingClientRect();
+        const menuX = canvasRect.left + (rect.left + rect.width / 2);
+        const menuY = Math.max(70, canvasRect.top + rect.top - 55);
+        setContextMenu({
+          position: { x: menuX, y: menuY },
+          selectedCount: canvas.getActiveObjects().length,
+          strokeColor: (obj as any).stroke,
+          strokeWidth: (obj as any).strokeWidth,
+          isRightClick: false,
+        });
+      }
     };
+
+    const handleCanvasContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      const activeObjs = canvas.getActiveObjects();
+      setContextMenu({
+        position: { x: e.clientX, y: e.clientY },
+        selectedCount: activeObjs.length,
+        strokeColor: (activeObjs[0] as any)?.stroke,
+        strokeWidth: (activeObjs[0] as any)?.strokeWidth,
+        isRightClick: true,
+      });
+    };
+
+    const upperEl = canvas.upperCanvasEl;
+    if (upperEl) {
+      upperEl.addEventListener('contextmenu', handleCanvasContextMenu);
+    }
 
     canvas.on('selection:created', onSelectionChanged);
     canvas.on('selection:updated', onSelectionChanged);
-    canvas.on('selection:cleared', () => useUIStore.getState().setSelectedObjectAngle(null));
+    canvas.on('selection:cleared', () => {
+      useUIStore.getState().setSelectedObjectAngle(null);
+      setContextMenu(null);
+    });
     canvas.on('object:rotating', updateAngle);
     canvas.on('object:modified', () => {
       updateAngle();
@@ -1756,6 +2008,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
 
     return () => {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      if (upperEl) upperEl.removeEventListener('contextmenu', handleCanvasContextMenu);
       canvas.dispose();
       fabricCanvasRef.current = null;
     };
@@ -2028,6 +2281,26 @@ export const CanvasEditor: React.FC = React.memo(() => {
     return () => window.removeEventListener('lipi:edit-reference-font', handleTrace);
   }, [editReferenceFont]);
 
+  // Global canvas shortcuts & toolbar actions (Copy, Paste, Cut, Duplicate across letters)
+  useEffect(() => {
+    const onCopy = () => handleCopy();
+    const onPaste = () => handlePaste();
+    const onCut = () => handleCut();
+    const onDuplicate = () => handleDuplicate();
+
+    window.addEventListener('lipi:canvas-copy', onCopy);
+    window.addEventListener('lipi:canvas-paste', onPaste);
+    window.addEventListener('lipi:canvas-cut', onCut);
+    window.addEventListener('lipi:canvas-duplicate', onDuplicate);
+
+    return () => {
+      window.removeEventListener('lipi:canvas-copy', onCopy);
+      window.removeEventListener('lipi:canvas-paste', onPaste);
+      window.removeEventListener('lipi:canvas-cut', onCut);
+      window.removeEventListener('lipi:canvas-duplicate', onDuplicate);
+    };
+  }, [handleCopy, handlePaste, handleCut, handleDuplicate]);
+
   // Handle Drag Resizing of the Canvas Card
   const handleResizeMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -2192,6 +2465,32 @@ export const CanvasEditor: React.FC = React.memo(() => {
       ref={containerRef}
       className="relative flex-1 w-full h-full flex flex-col bg-canvas-pattern-light overflow-hidden select-none"
     >
+      {/* Global Quick Action Toast */}
+      <CanvasToast />
+
+      {/* Floating & Desktop Context Menu (Triggered on stroke left-click or canvas right-click) */}
+      {contextMenu && (
+        <CanvasContextMenu
+          position={contextMenu.position}
+          selectedCount={contextMenu.selectedCount}
+          strokeColor={contextMenu.strokeColor}
+          strokeWidth={contextMenu.strokeWidth}
+          isRightClick={contextMenu.isRightClick}
+          canPaste={!!clipboard && clipboard.paths.length > 0}
+          clipboardChar={clipboard?.sourceCharacter}
+          clipboardCount={clipboard?.paths.length || 0}
+          onCopy={handleCopy}
+          onPaste={handlePaste}
+          onDuplicate={handleDuplicate}
+          onCut={handleCut}
+          onDelete={handleDelete}
+          onFlipX={handleFlipX}
+          onFlipY={handleFlipY}
+          onEditNodes={handleEditNodes}
+          onCopyToLetter={handleCopyToLetter}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
 
 
       {/* WORKSPACE & CANVAS AREA */}
