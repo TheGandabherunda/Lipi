@@ -24,3 +24,4 @@ describe('kannadaTransliteration', () => {
     expect(transliterateEnglishToKannada('namaste 123')).toBe('ನಮಸ್ತೆ 123');
   });
 });
+

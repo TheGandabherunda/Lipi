@@ -337,7 +337,65 @@ export interface CompileFontOptions {
   canvasHeight?: number;
   baseFontBuffer?: ArrayBuffer;
   fontId?: string;
+  mapLatinKeys?: boolean;
 }
+
+/**
+ * Direct Latin keyboard key mapping (English physical keys to Kannada characters).
+ * Allows typing Kannada letters on standard English keyboards (e.g. 'a' -> 'ಅ')
+ * and ensures Windows Font Viewer (fontview.exe) renders custom Kannada glyphs.
+ */
+export const KANNADA_TO_LATIN_KEYS: Record<string, number[]> = {
+  'U+0C85': [65, 97],          // ಅ -> 'A', 'a'
+  'U+0C86': [65, 97],          // ಆ
+  'U+0C87': [73, 105],        // ಇ -> 'I', 'i'
+  'U+0C88': [73, 105],        // ಈ
+  'U+0C89': [85, 117],        // ಉ -> 'U', 'u'
+  'U+0C8A': [85, 117],        // ಊ
+  'U+0C8B': [82, 114],        // ಋ -> 'R', 'r'
+  'U+0C8E': [69, 101],        // ಎ -> 'E', 'e'
+  'U+0C8F': [69, 101],        // ಏ
+  'U+0C90': [89, 121],        // ಐ -> 'Y', 'y'
+  'U+0C92': [79, 111],        // ಒ -> 'O', 'o'
+  'U+0C93': [79, 111],        // ಓ
+  'U+0C94': [87, 119],        // ಔ -> 'W', 'w'
+  'U+0C95': [75, 107],        // ಕ -> 'K', 'k'
+  'U+0C96': [75, 107],        // ಖ
+  'U+0C97': [71, 103],        // ಗ -> 'G', 'g'
+  'U+0C98': [71, 103],        // ಘ
+  'U+0C9A': [67, 99],         // ಚ -> 'C', 'c'
+  'U+0C9C': [74, 106],        // ಜ -> 'J', 'j'
+  'U+0C9F': [84, 116],        // ಟ -> 'T', 't'
+  'U+0CA1': [68, 100],        // ಡ -> 'D', 'd'
+  'U+0CA3': [78, 110],        // ಣ -> 'N', 'n'
+  'U+0CA4': [84, 116],        // ತ -> 'T', 't'
+  'U+0CA6': [68, 100],        // ದ -> 'D', 'd'
+  'U+0CA8': [78, 110],        // ನ -> 'N', 'n'
+  'U+0CAA': [80, 112],        // ಪ -> 'P', 'p'
+  'U+0CAB': [70, 102],        // ಫ -> 'F', 'f'
+  'U+0CAC': [66, 98],         // ಬ -> 'B', 'b'
+  'U+0CAD': [66, 98],         // ಭ
+  'U+0CAE': [77, 109],        // ಮ -> 'M', 'm'
+  'U+0CAF': [89, 121],        // ಯ -> 'Y', 'y'
+  'U+0CB0': [82, 114],        // ರ -> 'R', 'r'
+  'U+0CB2': [76, 108],        // ಲ -> 'L', 'l'
+  'U+0CB3': [76, 108],        // ಳ
+  'U+0CB5': [86, 118],        // ವ -> 'V', 'v'
+  'U+0CB6': [83, 115],        // ಶ -> 'S', 's'
+  'U+0CB7': [83, 115],        // ಷ
+  'U+0CB8': [83, 115],        // ಸ
+  'U+0CB9': [72, 104],        // ಹ -> 'H', 'h'
+  'U+0CE6': [48],             // ೦ -> '0'
+  'U+0CE7': [49],             // ೧ -> '1'
+  'U+0CE8': [50],             // ೨ -> '2'
+  'U+0CE9': [51],             // ೩ -> '3'
+  'U+0CEA': [52],             // ೪ -> '4'
+  'U+0CEB': [53],             // ೫ -> '5'
+  'U+0CEC': [54],             // ೬ -> '6'
+  'U+0CED': [55],             // ೭ -> '7'
+  'U+0CEE': [56],             // ೮ -> '8'
+  'U+0CEF': [57],             // ೯ -> '9'
+};
 
 /**
  * Compiles a font by patching custom-drawn vector glyphs onto an authentic Kannada base font.
@@ -412,6 +470,25 @@ export function compileFontFromBase(
         if (userGlyph.advanceWidth && userGlyph.advanceWidth > 0) {
           targetGlyph.advanceWidth = userGlyph.advanceWidth;
         }
+
+        // Direct Latin keyboard mapping (maps 'a' -> 'ಅ' etc.)
+        if (options?.mapLatinKeys && KANNADA_TO_LATIN_KEYS[item.unicode]) {
+          const latinCodes = KANNADA_TO_LATIN_KEYS[item.unicode];
+          const curUnicodes = targetGlyph.unicodes || (targetGlyph.unicode !== undefined ? [targetGlyph.unicode] : []);
+          targetGlyph.unicodes = Array.from(new Set([...curUnicodes, ...latinCodes]));
+
+          // Also mirror path directly to the Latin glyphs in the base font so both ASCII lookups match
+          latinCodes.forEach((code) => {
+            const char = String.fromCharCode(code);
+            const latinGlyph = font.charToGlyph(char);
+            if (latinGlyph && latinGlyph !== targetGlyph) {
+              latinGlyph.path = combinedPath;
+              if (userGlyph.advanceWidth && userGlyph.advanceWidth > 0) {
+                latinGlyph.advanceWidth = userGlyph.advanceWidth;
+              }
+            }
+          });
+        }
       }
     }
   });
@@ -467,6 +544,13 @@ export function compileFontStandalone(
     const userGlyph = glyphs[item.unicode];
     const advanceWidth = userGlyph?.advanceWidth || item.defaultAdvanceWidth || Math.round(upm * 0.7);
 
+    // Direct Latin keyboard mapping (maps 'a' -> 'ಅ' etc.)
+    const latinCodes =
+      options?.mapLatinKeys && KANNADA_TO_LATIN_KEYS[item.unicode]
+        ? KANNADA_TO_LATIN_KEYS[item.unicode]
+        : [];
+    const glyphUnicodes = Array.from(new Set([unicodeNum, ...latinCodes]));
+
     if (userGlyph && userGlyph.paths && userGlyph.paths.length > 0) {
       const combinedPath = convertUserPathsToFontGlyphPath(
         userGlyph.paths,
@@ -480,6 +564,7 @@ export function compileFontStandalone(
       const glyph = new opentype.Glyph({
         name: `uni${unicodeNum.toString(16).toUpperCase().padStart(4, '0')}`,
         unicode: unicodeNum,
+        unicodes: glyphUnicodes,
         advanceWidth,
         path: combinedPath,
       });
@@ -507,6 +592,7 @@ export function compileFontStandalone(
       const glyph = new opentype.Glyph({
         name: `uni${unicodeNum.toString(16).toUpperCase().padStart(4, '0')}`,
         unicode: unicodeNum,
+        unicodes: glyphUnicodes,
         advanceWidth: outline?.advanceWidth || advanceWidth,
         path: refPath,
       });
@@ -598,13 +684,18 @@ export async function downloadFontPackage(
   format: 'ttf' | 'otf' | 'woff' | 'zip',
   canvasMetrics?: { leftMarginX: number; baselineY: number; scale: number },
   fontId?: string,
-  extraOptions?: { canvasWidth?: number; canvasHeight?: number }
+  extraOptions?: {
+    canvasWidth?: number;
+    canvasHeight?: number;
+    mapLatinKeys?: boolean;
+  }
 ): Promise<void> {
   const font = await compileFontAsync(metadata, glyphs, referenceOutlines, {
     canvasMetrics,
     fontId,
     canvasWidth: extraOptions?.canvasWidth,
     canvasHeight: extraOptions?.canvasHeight,
+    mapLatinKeys: extraOptions?.mapLatinKeys,
   });
   const fontName = (metadata.name || 'LipiKannadaFont').trim().replace(/[^a-zA-Z0-9_\-]/g, '_');
   const buffer = font.toArrayBuffer();
