@@ -593,3 +593,4 @@ export const KeyboardShortcutsModal: React.FC = () => {
     </div>
   );
 };
+

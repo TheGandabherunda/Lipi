@@ -6,61 +6,11 @@ import type { VectorGlyphOutline } from '../constants/kannadaVectorOutlines';
 import { KANNADA_VECTOR_OUTLINES } from '../constants/kannadaVectorOutlines';
 import { KANNADA_CHARACTERS_LIST } from '../constants/kannadaCharacters';
 import { getBaseFontBuffer, getCachedFontBuffer } from './googleFontsManager';
-
 import { calculateGuidelinePositions } from '../components/canvas/CanvasGuidelines';
+import { transformPathToFontUnits } from './coordinateSystem';
 import type { VectorPathData } from '../types/glyph';
 
-/**
- * Transforms an opentype.Path from canvas pixel coordinates into font units (1000 UPM)
- */
-export function transformPathToFontUnits(
-  path: opentype.Path,
-  leftMarginX: number,
-  baselineY: number,
-  scale: number
-): opentype.Path {
-  const result = new opentype.Path();
-
-  path.commands.forEach((cmd) => {
-    switch (cmd.type) {
-      case 'M':
-        result.moveTo(
-          Math.round((cmd.x - leftMarginX) / scale),
-          Math.round((baselineY - cmd.y) / scale)
-        );
-        break;
-      case 'L':
-        result.lineTo(
-          Math.round((cmd.x - leftMarginX) / scale),
-          Math.round((baselineY - cmd.y) / scale)
-        );
-        break;
-      case 'Q':
-        result.quadTo(
-          Math.round((cmd.x1 - leftMarginX) / scale),
-          Math.round((baselineY - cmd.y1) / scale),
-          Math.round((cmd.x - leftMarginX) / scale),
-          Math.round((baselineY - cmd.y) / scale)
-        );
-        break;
-      case 'C':
-        result.curveTo(
-          Math.round((cmd.x1 - leftMarginX) / scale),
-          Math.round((baselineY - cmd.y1) / scale),
-          Math.round((cmd.x2 - leftMarginX) / scale),
-          Math.round((baselineY - cmd.y2) / scale),
-          Math.round((cmd.x - leftMarginX) / scale),
-          Math.round((baselineY - cmd.y) / scale)
-        );
-        break;
-      case 'Z':
-        result.close();
-        break;
-    }
-  });
-
-  return result;
-}
+export { transformPathToFontUnits };
 
 /**
  * Samples continuous point chains from opentype path commands
@@ -341,50 +291,53 @@ export interface CompileFontOptions {
 }
 
 /**
- * Direct Latin keyboard key mapping (English physical keys to Kannada characters).
- * Allows typing Kannada letters on standard English keyboards (e.g. 'a' -> 'ಅ')
- * and ensures Windows Font Viewer (fontview.exe) renders custom Kannada glyphs.
+ * Optional Latin preview aliases (maps standard English keys to primary Kannada glyphs).
+ * Intended solely for previewing custom glyphs on keyboards without Kannada input methods
+ * or in simple desktop font viewers (e.g. Windows fontview.exe).
+ * NOTE: This is NOT Indic complex text shaping.
  */
 export const KANNADA_TO_LATIN_KEYS: Record<string, number[]> = {
-  'U+0C85': [65, 97],          // ಅ -> 'A', 'a'
-  'U+0C86': [65, 97],          // ಆ
-  'U+0C87': [73, 105],        // ಇ -> 'I', 'i'
-  'U+0C88': [73, 105],        // ಈ
-  'U+0C89': [85, 117],        // ಉ -> 'U', 'u'
-  'U+0C8A': [85, 117],        // ಊ
-  'U+0C8B': [82, 114],        // ಋ -> 'R', 'r'
-  'U+0C8E': [69, 101],        // ಎ -> 'E', 'e'
-  'U+0C8F': [69, 101],        // ಏ
-  'U+0C90': [89, 121],        // ಐ -> 'Y', 'y'
-  'U+0C92': [79, 111],        // ಒ -> 'O', 'o'
-  'U+0C93': [79, 111],        // ಓ
-  'U+0C94': [87, 119],        // ಔ -> 'W', 'w'
-  'U+0C95': [75, 107],        // ಕ -> 'K', 'k'
-  'U+0C96': [75, 107],        // ಖ
-  'U+0C97': [71, 103],        // ಗ -> 'G', 'g'
-  'U+0C98': [71, 103],        // ಘ
-  'U+0C9A': [67, 99],         // ಚ -> 'C', 'c'
-  'U+0C9C': [74, 106],        // ಜ -> 'J', 'j'
-  'U+0C9F': [84, 116],        // ಟ -> 'T', 't'
-  'U+0CA1': [68, 100],        // ಡ -> 'D', 'd'
-  'U+0CA3': [78, 110],        // ಣ -> 'N', 'n'
-  'U+0CA4': [84, 116],        // ತ -> 'T', 't'
-  'U+0CA6': [68, 100],        // ದ -> 'D', 'd'
-  'U+0CA8': [78, 110],        // ನ -> 'N', 'n'
-  'U+0CAA': [80, 112],        // ಪ -> 'P', 'p'
-  'U+0CAB': [70, 102],        // ಫ -> 'F', 'f'
-  'U+0CAC': [66, 98],         // ಬ -> 'B', 'b'
-  'U+0CAD': [66, 98],         // ಭ
-  'U+0CAE': [77, 109],        // ಮ -> 'M', 'm'
-  'U+0CAF': [89, 121],        // ಯ -> 'Y', 'y'
-  'U+0CB0': [82, 114],        // ರ -> 'R', 'r'
-  'U+0CB2': [76, 108],        // ಲ -> 'L', 'l'
-  'U+0CB3': [76, 108],        // ಳ
-  'U+0CB5': [86, 118],        // ವ -> 'V', 'v'
-  'U+0CB6': [83, 115],        // ಶ -> 'S', 's'
-  'U+0CB7': [83, 115],        // ಷ
-  'U+0CB8': [83, 115],        // ಸ
-  'U+0CB9': [72, 104],        // ಹ -> 'H', 'h'
+  'U+0C85': [97],             // ಅ -> 'a'
+  'U+0C86': [65],             // ಆ -> 'A'
+  'U+0C87': [105],            // ಇ -> 'i'
+  'U+0C88': [73],             // ಈ -> 'I'
+  'U+0C89': [117],            // ಉ -> 'u'
+  'U+0C8A': [85],             // ಊ -> 'U'
+  'U+0C8B': [82],             // ಋ -> 'R'
+  'U+0C8E': [101],            // ಎ -> 'e'
+  'U+0C8F': [69],             // ಏ -> 'E'
+  'U+0C90': [89],             // ಐ -> 'Y'
+  'U+0C92': [111],            // ಒ -> 'o'
+  'U+0C93': [79],             // ಓ -> 'O'
+  'U+0C94': [87],             // ಔ -> 'W'
+  'U+0C95': [107],            // ಕ -> 'k'
+  'U+0C96': [75],             // ಖ -> 'K'
+  'U+0C97': [103],            // ಗ -> 'g'
+  'U+0C98': [71],             // ಘ -> 'G'
+  'U+0C9A': [99],             // ಚ -> 'c'
+  'U+0C9B': [67],             // ಛ -> 'C'
+  'U+0C9C': [106],            // ಜ -> 'j'
+  'U+0C9D': [74],             // ಝ -> 'J'
+  'U+0C9F': [116],            // ಟ -> 't'
+  'U+0CA1': [100],            // ಡ -> 'd'
+  'U+0CA3': [78],             // ಣ -> 'N'
+  'U+0CA4': [84],             // ತ -> 'T'
+  'U+0CA6': [68],             // ದ -> 'D'
+  'U+0CA8': [110],            // ನ -> 'n'
+  'U+0CAA': [112],            // ಪ -> 'p'
+  'U+0CAB': [102],            // ಫ -> 'f'
+  'U+0CAC': [98],             // ಬ -> 'b'
+  'U+0CAD': [66],             // ಭ -> 'B'
+  'U+0CAE': [109],            // ಮ -> 'm'
+  'U+0CAF': [121],            // ಯ -> 'y'
+  'U+0CB0': [114],            // ರ -> 'r'
+  'U+0CB2': [108],            // ಲ -> 'l'
+  'U+0CB3': [76],             // ಳ -> 'L'
+  'U+0CB5': [118],            // ವ -> 'v'
+  'U+0CB6': [83],             // ಶ -> 'S'
+  'U+0CB7': [120],            // ಷ -> 'x'
+  'U+0CB8': [115],            // ಸ -> 's'
+  'U+0CB9': [104],            // ಹ -> 'h'
   'U+0CE6': [48],             // ೦ -> '0'
   'U+0CE7': [49],             // ೧ -> '1'
   'U+0CE8': [50],             // ೨ -> '2'
@@ -397,10 +350,86 @@ export const KANNADA_TO_LATIN_KEYS: Record<string, number[]> = {
   'U+0CEF': [57],             // ೯ -> '9'
 };
 
+export interface FontValidationResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+/**
+ * Validates the integrity of an OpenType font instance or compiled ArrayBuffer before export.
+ */
+export function validateCompiledFont(fontOrBuffer: opentype.Font | ArrayBuffer): FontValidationResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  if (!fontOrBuffer) {
+    errors.push('Font object or buffer is null or undefined.');
+    return { valid: false, errors, warnings };
+  }
+
+  let font: opentype.Font;
+  let buffer: ArrayBuffer;
+
+  if (fontOrBuffer instanceof ArrayBuffer) {
+    buffer = fontOrBuffer;
+    if (buffer.byteLength < 500) {
+      errors.push(`Compiled font binary is unexpectedly small / under 500 bytes (${buffer.byteLength} bytes).`);
+      return { valid: false, errors, warnings };
+    }
+    try {
+      font = opentype.parse(buffer);
+    } catch (err) {
+      errors.push(`Failed to parse compiled font binary: ${err instanceof Error ? err.message : String(err)}`);
+      return { valid: false, errors, warnings };
+    }
+  } else {
+    font = fontOrBuffer;
+    // Test binary serialization
+    try {
+      buffer = font.toArrayBuffer();
+      if (!buffer || buffer.byteLength < 500) {
+        errors.push(`Compiled font binary is unexpectedly small (${buffer ? buffer.byteLength : 0} bytes).`);
+      }
+    } catch (err) {
+      errors.push(`font.toArrayBuffer() failed: ${err instanceof Error ? err.message : String(err)}`);
+      return { valid: false, errors, warnings };
+    }
+
+    // Test round-trip parse
+    try {
+      const reparsed = opentype.parse(buffer);
+      if (!reparsed || !reparsed.glyphs || reparsed.glyphs.length === 0) {
+        errors.push('Re-parsing font binary yielded an empty glyph table.');
+      }
+    } catch (err) {
+      errors.push(`Re-parsing font binary failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  if (!font.unitsPerEm || font.unitsPerEm <= 0) {
+    errors.push(`Invalid unitsPerEm: ${font.unitsPerEm}`);
+  }
+
+  if (!font.glyphs || font.glyphs.length === 0) {
+    errors.push('Font contains no glyphs.');
+    return { valid: false, errors, warnings };
+  }
+
+  // Ensure mandatory .notdef glyph exists at index 0
+  const notdef = font.glyphs.get(0);
+  if (!notdef) {
+    warnings.push('Font lacks a standard .notdef glyph at index 0.');
+  }
+
+  return { valid: errors.length === 0, errors, warnings };
+}
+
 /**
  * Compiles a font by patching custom-drawn vector glyphs onto an authentic Kannada base font.
- * This preserves all Indic OpenType GSUB (knd2/knda), GPOS, below-base conjuncts (ottakshara),
- * akhand ligatures (ಕ್ಷ, ಜ್ಞ), and mark attachment tables.
+ * NOTE (Hybrid Base Mode): This patches user-drawn primary Kannada outlines into the base font.
+ * Complex Indic shaping (GSUB/GPOS conjunct substitutions and mark positioning) is inherited
+ * from the base font for existing conjunct glyphs.
  */
 export function compileFontFromBase(
   baseBuffer: ArrayBuffer,
@@ -409,7 +438,6 @@ export function compileFontFromBase(
   _referenceOutlines: Record<string, VectorGlyphOutline> = KANNADA_VECTOR_OUTLINES,
   options?: CompileFontOptions
 ): opentype.Font {
-  // Parse a fresh instance from the font ArrayBuffer
   const font = opentype.parse(baseBuffer.slice(0));
 
   const familyName =
@@ -418,7 +446,6 @@ export function compileFontFromBase(
   const styleName = metadata.weightName || metadata.styleName || 'Regular';
   const weightClass = metadata.weightClass || 400;
 
-  // Format naming tables for OpenType serialization
   const anyFont = font as any;
   anyFont.names = anyFont.names || {};
   anyFont.names.windows = anyFont.names.windows || {};
@@ -463,7 +490,6 @@ export function compileFontFromBase(
         options?.canvasMetrics
       );
 
-      // Target glyph lookup in font
       const targetGlyph = font.charToGlyph(item.character);
       if (targetGlyph && targetGlyph.unicode !== undefined) {
         targetGlyph.path = combinedPath;
@@ -471,13 +497,12 @@ export function compileFontFromBase(
           targetGlyph.advanceWidth = userGlyph.advanceWidth;
         }
 
-        // Direct Latin keyboard mapping (maps 'a' -> 'ಅ' etc.)
+        // Optional Latin preview alias mapping
         if (options?.mapLatinKeys && KANNADA_TO_LATIN_KEYS[item.unicode]) {
           const latinCodes = KANNADA_TO_LATIN_KEYS[item.unicode];
           const curUnicodes = targetGlyph.unicodes || (targetGlyph.unicode !== undefined ? [targetGlyph.unicode] : []);
           targetGlyph.unicodes = Array.from(new Set([...curUnicodes, ...latinCodes]));
 
-          // Also mirror path directly to the Latin glyphs in the base font so both ASCII lookups match
           latinCodes.forEach((code) => {
             const char = String.fromCharCode(code);
             const latinGlyph = font.charToGlyph(char);
@@ -493,11 +518,19 @@ export function compileFontFromBase(
     }
   });
 
+  const validation = validateCompiledFont(font);
+  if (!validation.valid) {
+    console.warn('Base font compilation validation warnings/errors:', validation.errors);
+  }
+
   return font;
 }
 
 /**
- * Standalone compilation fallback (when base font binary is unavailable)
+ * Standalone compilation mode (when base font binary is unavailable or when exporting pure outlines).
+ * NOTE (Standalone Prototype Mode): Compiles primary Kannada Unicode glyphs (U+0C80..U+0CFF) with
+ * accurate metrics into a standalone TrueType font. Does NOT construct custom GSUB/GPOS Indic
+ * shaping tables from scratch. Full complex conjunct shaping requires external mastering.
  */
 export function compileFontStandalone(
   metadata: LipiProjectMetadata,
@@ -507,8 +540,8 @@ export function compileFontStandalone(
 ): opentype.Font {
   const familyName = (metadata.name || 'LipiKannadaFont').trim().replace(/[^a-zA-Z0-9_\- ]/g, '') || 'LipiKannada';
   const upm = metadata.metrics.unitsPerEm || 1000;
-  const ascender = metadata.metrics.ascender || 810;
-  const descender = metadata.metrics.descender || -420;
+  const ascender = metadata.metrics.ascender || 790;
+  const descender = metadata.metrics.descender !== undefined ? metadata.metrics.descender : -420;
   const cw = options?.canvasWidth || 800;
   const ch = options?.canvasHeight || 800;
 
@@ -542,9 +575,8 @@ export function compileFontStandalone(
   KANNADA_CHARACTERS_LIST.forEach((item) => {
     const unicodeNum = parseInt(item.unicode.replace('U+', ''), 16);
     const userGlyph = glyphs[item.unicode];
-    const advanceWidth = userGlyph?.advanceWidth || item.defaultAdvanceWidth || Math.round(upm * 0.7);
+    const advanceWidth = userGlyph?.advanceWidth || item.defaultAdvanceWidth || Math.round(upm * 0.78);
 
-    // Direct Latin keyboard mapping (maps 'a' -> 'ಅ' etc.)
     const latinCodes =
       options?.mapLatinKeys && KANNADA_TO_LATIN_KEYS[item.unicode]
         ? KANNADA_TO_LATIN_KEYS[item.unicode]
@@ -618,15 +650,20 @@ export function compileFontStandalone(
       (font as any).tables.os2.usWeightClass = weightClass;
       (font as any).tables.os2.sTypoAscender = ascender;
       (font as any).tables.os2.sTypoDescender = descender;
-      (font as any).tables.os2.usWinAscent = 1383;
-      (font as any).tables.os2.usWinDescent = 757;
+      (font as any).tables.os2.usWinAscent = Math.max(1000, ascender);
+      (font as any).tables.os2.usWinDescent = Math.abs(descender);
     }
     if ((font as any).tables?.hhea) {
-      (font as any).tables.hhea.ascender = 1068;
-      (font as any).tables.hhea.descender = -586;
+      (font as any).tables.hhea.ascender = ascender;
+      (font as any).tables.hhea.descender = descender;
     }
   } catch {
     // Continue
+  }
+
+  const validation = validateCompiledFont(font);
+  if (!validation.valid) {
+    console.warn('Standalone font compilation validation warnings/errors:', validation.errors);
   }
 
   return font;
@@ -634,7 +671,7 @@ export function compileFontStandalone(
 
 /**
  * Synchronous compileFont that automatically uses cached base buffer if present,
- * or falls back cleanly to standalone compilation.
+ * or falls back cleanly to standalone prototype compilation.
  */
 export function compileFont(
   metadata: LipiProjectMetadata,
@@ -647,7 +684,7 @@ export function compileFont(
     try {
       return compileFontFromBase(baseBuffer, metadata, glyphs, referenceOutlines, options);
     } catch (e) {
-      console.warn('Failed compiling from base font, falling back to standalone:', e);
+      console.warn('Failed compiling from base font, falling back to standalone prototype:', e);
     }
   }
 
@@ -669,7 +706,7 @@ export async function compileFontAsync(
       (await getBaseFontBuffer(options?.fontId || 'noto-sans-kannada'));
     return compileFontFromBase(baseBuffer, metadata, glyphs, referenceOutlines, options);
   } catch (e) {
-    console.warn('Failed loading base font buffer, using standalone fallback:', e);
+    console.warn('Failed loading base font buffer, using standalone prototype fallback:', e);
     return compileFontStandalone(metadata, glyphs, referenceOutlines, options);
   }
 }
@@ -690,14 +727,31 @@ export async function downloadFontPackage(
     mapLatinKeys?: boolean;
   }
 ): Promise<void> {
-  const font = await compileFontAsync(metadata, glyphs, referenceOutlines, {
-    canvasMetrics,
-    fontId,
-    canvasWidth: extraOptions?.canvasWidth,
-    canvasHeight: extraOptions?.canvasHeight,
-    mapLatinKeys: extraOptions?.mapLatinKeys,
-  });
-  const fontName = (metadata.name || 'LipiKannadaFont').trim().replace(/[^a-zA-Z0-9_\-]/g, '_');
+  let isHybridMode = false;
+  let font: opentype.Font;
+
+  try {
+    const baseBuffer = await getBaseFontBuffer(fontId || 'noto-sans-kannada');
+    font = compileFontFromBase(baseBuffer, metadata, glyphs, referenceOutlines, {
+      canvasMetrics,
+      fontId,
+      canvasWidth: extraOptions?.canvasWidth,
+      canvasHeight: extraOptions?.canvasHeight,
+      mapLatinKeys: extraOptions?.mapLatinKeys,
+    });
+    isHybridMode = true;
+  } catch {
+    font = compileFontStandalone(metadata, glyphs, referenceOutlines, {
+      canvasMetrics,
+      fontId,
+      canvasWidth: extraOptions?.canvasWidth,
+      canvasHeight: extraOptions?.canvasHeight,
+      mapLatinKeys: extraOptions?.mapLatinKeys,
+    });
+    isHybridMode = false;
+  }
+
+  const fontName = (metadata.name || 'LipiKannadaFont').trim().replace(/[^a-zA-Z0-9_-]/g, '_');
   const buffer = font.toArrayBuffer();
 
   if (format === 'ttf') {
@@ -726,20 +780,25 @@ export async function downloadFontPackage(
   zip.file(`${fontName}.otf`, buffer);
   zip.file(`${fontName}.woff`, buffer);
 
-  // 2. Clear Cross-Platform Installation Guide
+  // 2. Clear Cross-Platform Installation Guide with Honest Shaping Notes
   const instructions = `========================================================================
 ${metadata.name} - Kannada Font Installation & Usage Instructions
 ========================================================================
 Author: ${metadata.author || 'Kannada Lipikara'}
 Version: ${metadata.version || '1.0.0'}
-Generated by: Lipi (ಲಿಪಿ) - Vector Kannada Font Creator
-OpenType Script: knd2 (Indic Kannada Complex Text Layout)
-GSUB Features: akhn, rphf, blwf (Ottakshara Conjuncts), abvs, blws, psts, haln
+Generated by: Lipi (ಲಿಪಿ) - Kannada Typeface Design Studio
+Export Mode: ${isHybridMode ? 'Hybrid Base Mode (Noto Sans Kannada engine)' : 'Standalone Outline Prototype Mode'}
+Script: Kannada (Unicode block U+0C80..U+0CFF)
+
+--- ABOUT SHAPING & COMPLEX TEXT LAYOUT ---
+- Single Characters: Standard Kannada vowels, consonants, standalone matras, and numerals are directly mapped to their official Unicode code points.
+${isHybridMode
+  ? '- Complex Shaping (GSUB/GPOS): This font patches user-drawn base outlines onto the authentic Noto Sans Kannada base engine. Base consonant and vowel appearances use your custom artwork; unedited subjoined forms (ottakshara) use the base font engine.'
+  : '- Complex Shaping (GSUB/GPOS): This is an outline prototype font. It provides standard Unicode glyph mappings for design and visual testing. For full production Indic text layout (automatic below-base conjunct substitution and mark positioning), import these glyph outlines into an OpenType font mastering tool (such as FontForge, Glyphs, or fonttools).'}
 
 --- HOW TO INSTALL ON WINDOWS ---
 1. Right-click "${fontName}.ttf" and choose "Install" (or "Install for all users").
-2. Alternatively, double-click "${fontName}.ttf" and click the "Install" button.
-3. The font will immediately appear in MS Word, Photoshop, Illustrator, Figma, Notepad, etc.
+2. The font will appear in MS Word, Photoshop, Illustrator, Figma, Notepad, etc.
 
 --- HOW TO INSTALL ON MACOS ---
 1. Double-click "${fontName}.ttf".
@@ -760,13 +819,12 @@ GSUB Features: akhn, rphf, blwf (Ottakshara Conjuncts), abvs, blws, psts, haln
 
 body {
   font-family: '${metadata.name}', 'Anek Kannada', 'Noto Sans Kannada', sans-serif;
-  font-feature-settings: 'knd2' 1, 'blwf' 1, 'akhn' 1, 'rphf' 1, 'abvs' 1, 'blws' 1, 'psts' 1, 'haln' 1;
   text-rendering: optimizeLegibility;
 }
 `;
   zip.file('INSTALL_INSTRUCTIONS.txt', instructions);
 
-  // 3. Interactive HTML Preview Tester with CTL Shaping
+  // 3. Interactive HTML Preview Tester
   const base64Font = arrayBufferToBase64(buffer);
   const sampleHtml = `<!DOCTYPE html>
 <html lang="kn">
@@ -789,7 +847,6 @@ body {
     }
     .custom-kannada {
       font-family: 'CustomKannadaFont', 'Anek Kannada', 'Noto Sans Kannada', sans-serif;
-      font-feature-settings: "knd2" 1, "blwf" 1, "akhn" 1, "rphf" 1, "abvs" 1, "blws" 1, "psts" 1, "haln" 1;
       text-rendering: optimizeLegibility;
       -webkit-font-smoothing: antialiased;
     }
@@ -844,7 +901,7 @@ body {
 </head>
 <body>
   <h1>${metadata.name} - Kannada Type Tester</h1>
-  <p>Authentic OpenType Kannada font with full GSUB conjuncts, matras, and below-base shaping.</p>
+  <p>Mode: ${isHybridMode ? 'Hybrid Base Mode (Noto Sans Kannada)' : 'Standalone Prototype Mode'} • Unicode U+0C80..U+0CFF</p>
 
   <div class="card">
     <h2 style="font-size: 18px; margin-top: 0; color: #cbd5e1;">Interactive Typewriter</h2>
@@ -878,7 +935,6 @@ body {
 </html>`;
   zip.file('sample-preview.html', sampleHtml);
 
-  // Generate and download zip
   const zipBlob = await zip.generateAsync({ type: 'blob' });
   triggerDownload(zipBlob, `${fontName}_Complete_Font_Package.zip`);
 }

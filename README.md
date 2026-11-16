@@ -22,7 +22,7 @@ Designing Indic typefaces has traditionally required heavy, desktop-bound font s
 2. **Trace** against authentic baseline references (Noto Sans Kannada, Tiro Kannada, Baloo Tamma 2, Anek Kannada, Hubballi) or imported TTF/OTF fonts.
 3. **Audit** against the authentic 78-glyph Kannada roster, including Swaras, Vyanjanas, Gunithaksharas (Matras), Numbers, and Modifiers.
 4. **Test** in real-time with integrated Baraha / ITRANS phonetic transliteration across waterfall scales and ligature matrices.
-5. **Compile** directly in-browser into installable TrueType (`.ttf`) fonts with preserved OpenType GSUB and GPOS shaping tables.
+5. **Compile** directly in-browser into TrueType (`.ttf`) fonts via Hybrid Base Mode (preserving existing base font shaping for conjuncts) or Standalone Outline / Prototype Mode.
 
 ---
 
@@ -35,14 +35,16 @@ Designing Indic typefaces has traditionally required heavy, desktop-bound font s
 - **Smart Segment Eraser**: Erases exact path segments while automatically repairing subpath continuities.
 - **Direct Node Selection**: Subpath-level manipulation—move individual nodes, adjust bezier handles, convert between sharp corners and smooth curves, and reverse contour orientations.
 
-### 📐 2. Authentic Kannada Typographic Guidelines
-- Coordinate metrics configured to OpenType standards (1000 UPM):
+### 📐 2. Authentic Kannada Typographic Guidelines & Configurable Metrics
+- Coordinate metrics configured to OpenType standards (1000 UPM by default, fully configurable):
   - **Ascender line**
   - **Cap Height line**
   - **Baseline**
   - **Descender line**
-  - **Center Vertical axis**
+  - **Mahaprana guideline**
+  - **Left and Right Sidebearings**
   - **Advance Width metric markers**
+- Single authoritative mathematical coordinate transform between screen canvas pixels and font design units.
 - Adaptive canvas sizing with fluid zoom (10% to 500%) and pan support.
 
 ### 🔤 3. 78-Glyph Kannada Master Roster
@@ -55,6 +57,7 @@ Organized into authentic script categories with advance widths extracted from na
 - **ವಿಶೇಷ ಚಿಹ್ನೆಗಳು (Modifiers & Ottakshara)**: ಅರ್ಕಾವತ್ತು (Arka), ಅವಗ್ರಹ (Avagraha), etc.
 
 ### 👁️ 4. Reference Fonts & Tracing System
+- Isolated non-destructive overlay layer that never mutates your project metrics or overwrites user artwork.
 - Pre-loaded authentic reference typefaces:
   - **Noto Sans Kannada** (Google / Monotype)
   - **Baloo Tamma 2** (Ek Type)
@@ -72,11 +75,13 @@ Organized into authentic script categories with advance widths extracted from na
 - **Gunithakshara Matrix**: Verify that vowel diacritics align consistently across consonants.
 - **Roster Progress Tracker**: Real-time completion counter tracking designed vs remaining glyphs.
 
-### 📦 6. In-Browser Font Compilation & Export
-- **TrueType Font (`.ttf`)**: Preserves base font OpenType tables (GSUB ligatures & GPOS mark positioning) while replacing glyph outlines with user designs.
+### 📦 6. In-Browser Font Compilation & Honest Export Pipeline
+- **Hybrid Base Mode (`.ttf`)**: Patches user-drawn primary Kannada outlines into an authentic base font (Noto Sans Kannada) while preserving the base font's existing OpenType shaping tables (GSUB/GPOS conjuncts and mark attachments).
+- **Standalone Outline / Prototype Mode (`.ttf`)**: Compiles a clean, valid OpenType TrueType font with exact Unicode mappings for custom vector outlines—ideal for design specimens, logo marks, or importing into professional font mastering tools (FontForge, AFDKO, Glyphs).
+- **Pre-download Integrity Validation**: Verifies binary size, unitsPerEm, glyph counts, and executes a round-trip OpenType parse check before triggering file download.
 - **SVG Font (`.svg`)**: Web-standard SVG font definition.
 - **SVG Glyphs ZIP (`.zip`)**: Individual clean SVG vector files for every glyph for use in Illustrator, Figma, or Inkscape.
-- **Native Lipi Project (`.lipi`)**: Complete JSON project snapshot containing all vector paths, undo history, metrics, and metadata.
+- **Native Lipi Project (`.lipi`)**: Complete schema-versioned (v1.1.0) JSON project snapshot containing all vector paths, per-glyph undo/redo history, metrics, weight profiles, and metadata.
 
 ---
 

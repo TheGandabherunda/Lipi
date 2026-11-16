@@ -77,14 +77,9 @@ export const CanvasReferenceFontControl: React.FC = () => {
       setSelectedGoogleFont(fontId);
 
       const parsedFont = await loadParsedFont(fontDef);
-      const { metrics, outlines } = extractOutlinesFromFont(parsedFont);
+      const { outlines } = extractOutlinesFromFont(parsedFont);
 
-      updateMetadata({
-        metrics: {
-          ...metadata.metrics,
-          ...metrics,
-        },
-      });
+      // Keep user project metrics intact; only update the reference overlay outlines
       setActiveOutlines(outlines);
     } catch (err) {
       console.error('Failed to switch Google font:', err);
@@ -109,10 +104,7 @@ export const CanvasReferenceFontControl: React.FC = () => {
       }
 
       setSelectedGoogleFont('custom');
-      updateMetadata({
-        name: result.fontName,
-        metrics: result.metrics,
-      });
+      // Set reference outlines strictly without overwriting user project name or metrics
       setActiveOutlines(result.outlines);
     } catch (err) {
       alert(`Failed to import font: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -122,7 +114,7 @@ export const CanvasReferenceFontControl: React.FC = () => {
     }
   };
 
-  // Reset Guidelines
+  // Reset Guidelines to authentic standards
   const handleResetGuidelines = () => {
     updateMetadata({
       metrics: {
@@ -132,17 +124,26 @@ export const CanvasReferenceFontControl: React.FC = () => {
         capHeight: 565,
         baseline: 0,
         descender: -420,
+        mahaprana: -144,
       },
     });
   };
 
-  // Auto-Snap Guidelines to Glyph
+  // Auto-Snap Guidelines to Glyph Bounds (explicit action)
   const handleFitGuidelines = () => {
     const outline = activeOutlines[activeUnicode];
-    if (!outline || !outline.bbox) return;
+    if (!outline || !outline.bbox) {
+      alert('No reference outline bounding box available for the active character.');
+      return;
+    }
 
     const { y1, y2 } = outline.bbox;
     const upm = metadata.metrics.unitsPerEm || 1000;
+
+    const confirmed = window.confirm(
+      `Update project metrics to match reference bounding box for '${activeUnicode}'?\n\nAscender: ${Math.max(y2, 790)}\nCap Height: ${Math.min(upm, Math.max(400, y2 > 700 ? Math.round(y2 * 0.72) : y2))}\nDescender: ${y1 < 0 ? y1 : -420}`
+    );
+    if (!confirmed) return;
 
     updateMetadata({
       metrics: {
@@ -359,6 +360,14 @@ export const CanvasReferenceFontControl: React.FC = () => {
               <button
                 type="button"
                 onClick={() => {
+                  const currentGlyph = useGlyphStore.getState().glyphs[activeUnicode];
+                  const hasExistingArt = Boolean(currentGlyph?.paths && currentGlyph.paths.length > 0);
+                  if (hasExistingArt) {
+                    const confirmed = window.confirm(
+                      `Character '${currentGlyph?.character || activeUnicode}' already has drawn strokes.\n\nDo you want to add the reference outline to your canvas artwork?`
+                    );
+                    if (!confirmed) return;
+                  }
                   window.dispatchEvent(new CustomEvent('lipi:edit-reference-font'));
                   setIsOpen(false);
                 }}

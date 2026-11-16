@@ -20,3 +20,4 @@ describe('Keyboard Shortcuts & Modal Store', () => {
     expect(useUIStore.getState().isShortcutsModalOpen).toBe(false);
   });
 });
+

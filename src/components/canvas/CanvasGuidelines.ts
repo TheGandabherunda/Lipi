@@ -13,21 +13,26 @@ export interface GuideMetrics {
   leftMarginX: number;
   rightAdvanceX: number;
   scale: number;
+  unitsPerEm: number;
   ascenderUnits: number;
   capHeightUnits: number;
+  baselineUnits: number;
   descenderUnits: number;
+  mahapranaUnits: number;
+  leftSideBearingUnits: number;
+  rightSideBearingUnits: number;
 }
 
 /**
- * Calculates industrial-standard font design guidelines based on authentic OpenType
- * Indic/Kannada typography metrics:
+ * Calculates industrial-standard font design guidelines based on project-configurable
+ * OpenType metrics with authentic Kannada typography defaults:
  * 
- * - UnitsPerEm: 1000 UPM (or font custom upm)
- * - Talekattu / Ascender: +790 to +810 font units (Talekattu, deergha, upper matras ಿ, ೇ, ೈ, and tall vowels ಈ, ಊ, ಔ)
- * - Body Height / Shirorekha: +565 font units (Top of base consonant arches ಕ, ಗ, ಅ, ತ, ಬ, ಲ, ಮ)
- * - Baseline: 0 font units (Primary alignment floor for base letters)
- * - Mahaprana Tail: -144 font units (Downstroke on aspirates ಘ, ಛ, ಝ, ಢ, ಥ, ಧ, ಫ, ಭ)
- * - Ottakshara / Descender: -420 font units (Below-base conjuncts ್ಕ, ್ತ, ್ಮ, lower matras ು, ೂ, ೃ)
+ * - UnitsPerEm: default 1000 UPM
+ * - Talekattu / Ascender: default +790 font units (Talekattu, deergha, upper matras ಿ, ೇ, ೈ, and tall vowels ಈ, ಊ, ಔ)
+ * - Body Height / Shirorekha: default +565 font units (Top of base consonant arches ಕ, ಗ, ಅ, ತ, ಬ, ಲ, ಮ)
+ * - Baseline: default 0 font units (Primary alignment floor for base letters)
+ * - Mahaprana Tail: default -144 font units (Downstroke on aspirates ಘ, ಛ, ಝ, ಢ, ಥ, ಧ, ಫ, ಭ)
+ * - Ottakshara / Descender: default -420 font units (Below-base conjuncts ್ಕ, ್ತ, ್ಮ, lower matras ು, ೂ, ೃ)
  */
 export function calculateGuidelinePositions(
   canvasWidth: number,
@@ -38,24 +43,29 @@ export function calculateGuidelinePositions(
   const upm = metrics.unitsPerEm || 1000;
   const ascenderUnits = metrics.ascender || 790;
   const capHeightUnits = metrics.capHeight || 565;
+  const baselineUnits = metrics.baseline !== undefined ? metrics.baseline : 0;
   const descenderUnits = metrics.descender !== undefined ? metrics.descender : -420;
-  const totalSpanUnits = ascenderUnits - descenderUnits; // e.g. 1210
+  const mahapranaUnits = metrics.mahaprana !== undefined ? metrics.mahaprana : -144;
+  const leftSideBearingUnits = metrics.leftSideBearing !== undefined ? metrics.leftSideBearing : 50;
+  const rightSideBearingUnits = metrics.rightSideBearing !== undefined ? metrics.rightSideBearing : 50;
+
+  const totalSpanUnits = Math.max(100, ascenderUnits - descenderUnits); // e.g. 1210
   const glyphAdvance = advanceWidth || Math.round(upm * 0.78);
 
-  // Responsive dual-axis scale: Ensures both vertical span AND horizontal advance width
-  // fit comfortably inside the canvas with generous margins for all glyphs (narrow and wide)
+  // Maintain uniform font-unit scale across standard glyphs based on canvas height
   const usableHeight = canvasHeight * 0.72;
   const usableWidth = canvasWidth * 0.78;
   const scaleByHeight = usableHeight / Math.max(upm, totalSpanUnits);
-  const scaleByWidth = usableWidth / Math.max(glyphAdvance, 500);
+  // Scale down only if exceptionally wide glyph would overflow usable canvas width
+  const scaleByWidth = glyphAdvance * scaleByHeight > usableWidth ? usableWidth / glyphAdvance : scaleByHeight;
   const unitScale = Math.min(scaleByHeight, scaleByWidth);
 
   const totalContentHeight = totalSpanUnits * unitScale;
   const topPadding = Math.round((canvasHeight - totalContentHeight) / 2);
   const ascenderY = topPadding;
   const capHeightY = Math.round(topPadding + (ascenderUnits - capHeightUnits) * unitScale);
-  const baselineY = Math.round(topPadding + ascenderUnits * unitScale);
-  const mahapranaY = Math.round(baselineY + 144 * unitScale);
+  const baselineY = Math.round(topPadding + (ascenderUnits - baselineUnits) * unitScale);
+  const mahapranaY = Math.round(baselineY - mahapranaUnits * unitScale);
   const descenderY = Math.round(topPadding + totalSpanUnits * unitScale);
 
   const usableAdvanceWidth = glyphAdvance * unitScale;
@@ -73,9 +83,14 @@ export function calculateGuidelinePositions(
     leftMarginX,
     rightAdvanceX,
     scale: unitScale,
+    unitsPerEm: upm,
     ascenderUnits,
     capHeightUnits,
+    baselineUnits,
     descenderUnits,
+    mahapranaUnits,
+    leftSideBearingUnits,
+    rightSideBearingUnits,
   };
 }
 
@@ -131,19 +146,19 @@ export function renderCanvasGuidelines(
 
   // Upper Zone inside container (Talekattu / Ascender)
   ctx.fillStyle = 'rgba(225, 29, 72, 0.035)';
-  ctx.fillRect(boxX, guides.ascenderY, boxW, guides.capHeightY - guides.ascenderY);
+  ctx.fillRect(boxX, guides.ascenderY, boxW, Math.max(0, guides.capHeightY - guides.ascenderY));
 
   // Base Body Zone inside container (Mean / Shirorekha to Baseline)
   ctx.fillStyle = 'rgba(2, 132, 199, 0.045)';
-  ctx.fillRect(boxX, guides.capHeightY, boxW, guides.baselineY - guides.capHeightY);
+  ctx.fillRect(boxX, guides.capHeightY, boxW, Math.max(0, guides.baselineY - guides.capHeightY));
 
   // Mahaprana Zone inside container (Baseline to Mahaprana tail)
   ctx.fillStyle = 'rgba(217, 119, 6, 0.025)';
-  ctx.fillRect(boxX, guides.baselineY, boxW, guides.mahapranaY - guides.baselineY);
+  ctx.fillRect(boxX, guides.baselineY, boxW, Math.max(0, guides.mahapranaY - guides.baselineY));
 
   // Descender / Ottakshara Zone inside container
   ctx.fillStyle = 'rgba(147, 51, 234, 0.035)';
-  ctx.fillRect(boxX, guides.mahapranaY, boxW, guides.descenderY - guides.mahapranaY);
+  ctx.fillRect(boxX, guides.mahapranaY, boxW, Math.max(0, guides.descenderY - guides.mahapranaY));
 
   // 4. LETTER CONTAINER BOUNDARY FRAME & CORNER BRACKETS
   ctx.strokeStyle = 'rgba(79, 70, 229, 0.4)';
@@ -200,7 +215,7 @@ export function renderCanvasGuidelines(
   ctx.lineTo(boxX + boxW, guides.baselineY + 4);
   ctx.fill();
 
-  // Container Header Tag at Top: Letter Container • ಅಕ್ಷರ ಚೌಕಟ್ಟು
+  // Container Header Tag at Top
   const advanceSpan = Math.round(boxW / guides.scale);
   ctx.font = 'bold 11px Inter, sans-serif';
   const badgeText = `Letter Container • ಅಕ್ಷರ ಚೌಕಟ್ಟು (${advanceSpan} units)`;
@@ -220,6 +235,7 @@ export function renderCanvasGuidelines(
   ctx.fillText(badgeText, badgeX, badgeY);
 
   // 5. TRACING OUTLINE SITS EXACTLY INSIDE THIS CONTAINER
+  // Rendered with distinct color & dashed styling so it is visually unmistakable from user strokes
   if (tracing?.enabled && activeUnicode) {
     const outline = customOutlines !== undefined
       ? customOutlines[activeUnicode]
@@ -239,25 +255,27 @@ export function renderCanvasGuidelines(
       // Fill rendering (Fill only or Both)
       if (mode === 'fill' || mode === 'both') {
         const fillAlpha = Math.min(0.85, Math.max(0.04, tracing.opacity * 0.45 * fillIntensity));
-        ctx.fillStyle = `rgba(79, 70, 229, ${fillAlpha})`;
+        ctx.fillStyle = `rgba(99, 102, 241, ${fillAlpha})`;
         ctx.fill(path2d);
       }
 
       // Outline rendering (Outline only or Both)
       if (mode === 'outline' || mode === 'both') {
-        ctx.strokeStyle = `rgba(15, 23, 42, ${Math.max(0.06, tracing.opacity)})`;
+        ctx.strokeStyle = `rgba(99, 102, 241, ${Math.max(0.12, tracing.opacity)})`;
         ctx.lineWidth = outlineWidth;
         ctx.lineJoin = 'round';
         ctx.lineCap = 'round';
-        ctx.setLineDash([]);
+        // Distinct dashed line for reference font outline so it cannot be confused with user ink
+        ctx.setLineDash([5 / guides.scale, 4 / guides.scale]);
         ctx.stroke(path2d);
+        ctx.setLineDash([]);
       }
 
       ctx.restore();
     }
   }
 
-  // 4. Industrial Guideline Line Drawer
+  // 6. Industrial Guideline Line Drawer
   const drawMetricLine = (
     y: number,
     metricUnit: string,
@@ -292,7 +310,7 @@ export function renderCanvasGuidelines(
     ctx.fillText(text, 26, y - 4);
   };
 
-  // 1. Talekattu / Ascender (+790 to +810)
+  // 1. Talekattu / Ascender (project-configured)
   if (config.showAscender) {
     drawMetricLine(
       guides.ascenderY,
@@ -303,7 +321,7 @@ export function renderCanvasGuidelines(
     );
   }
 
-  // 2. Base Consonant Body Height / Shirorekha (+565)
+  // 2. Base Consonant Body Height / Shirorekha (project-configured)
   if (config.showCapHeight) {
     drawMetricLine(
       guides.capHeightY,
@@ -314,11 +332,11 @@ export function renderCanvasGuidelines(
     );
   }
 
-  // 3. Baseline (0) - Solid Anchor Ground Line
+  // 3. Baseline (project-configured, default 0) - Solid Anchor Ground Line
   if (config.showBaseline) {
     drawMetricLine(
       guides.baselineY,
-      '  0',
+      `  ${guides.baselineUnits}`,
       'Baseline',
       'ಮೂಲರೇಖೆ / ತಳರೇಖೆ',
       'rgba(22, 163, 74, 1)',
@@ -326,16 +344,16 @@ export function renderCanvasGuidelines(
     );
   }
 
-  // 4. Mahaprana Tail (-144) - Vertical tail for ಘ, ಛ, ಝ, ಢ, ಥ, ಧ, ಫ, ಭ
+  // 4. Mahaprana Tail (project-configured, default -144)
   drawMetricLine(
     guides.mahapranaY,
-    '-144',
+    `${guides.mahapranaUnits < 0 ? guides.mahapranaUnits : `-${guides.mahapranaUnits}`}`,
     'Mahaprana Tail',
     'ಮಹಾಪ್ರಾಣ ಇಳಿ ರೇಖೆ',
     'rgba(217, 119, 6, 0.75)'
   );
 
-  // 5. Ottakshara / Descender (-420)
+  // 5. Ottakshara / Descender (project-configured, default -420)
   if (config.showDescender) {
     drawMetricLine(
       guides.descenderY,

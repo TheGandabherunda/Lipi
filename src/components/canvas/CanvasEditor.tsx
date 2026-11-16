@@ -1,10 +1,9 @@
 import React, { useEffect, useRef, useCallback, useMemo, useState } from 'react';
-import { Canvas, PencilBrush, Path, ActiveSelection, util, type FabricObject } from 'fabric';
+import { Canvas, PencilBrush, Path, ActiveSelection, type FabricObject } from 'fabric';
 import { useGlyphStore } from '../../store/glyphStore';
 import { useUIStore } from '../../store/uiStore';
 import { calculateGuidelinePositions, renderCanvasGuidelines } from './CanvasGuidelines';
-import { fabricSegmentsToPathString, translateSVGPathString } from '../../utils/svgExport';
-import type { VectorPathData } from '../../types/glyph';
+import { cloneVectorPaths } from '../../utils/glyphUtils';
 import {
   eraseStrokesAlongSegment,
   samplePointsFromFabricSegments,
@@ -37,6 +36,13 @@ import { clsx } from 'clsx';
 import { CanvasReferenceFontControl } from './CanvasReferenceFontControl';
 import { CanvasContextMenu } from './CanvasContextMenu';
 import { CanvasToast } from './CanvasToast';
+import { renderCanvasOverlay } from './CanvasOverlayRenderer';
+import { useCanvasViewport } from './hooks/useCanvasViewport';
+import { useCanvasClipboard } from './hooks/useCanvasClipboard';
+import {
+  serializeCanvasPaths,
+  rehydrateFabricPath,
+} from './utils/canvasSerialization';
 
 export const CanvasEditor: React.FC = React.memo(() => {
   const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
@@ -83,7 +89,6 @@ export const CanvasEditor: React.FC = React.memo(() => {
   const [selectedNodesCount, setSelectedNodesCount] = useState<number>(0);
   const [activeNodeCoords, setActiveNodeCoords] = useState<{ x: number; y: number } | null>(null);
   const [hasActivePath, setHasActivePath] = useState<boolean>(false);
-  const [isSpaceHeld, setIsSpaceHeld] = useState<boolean>(false);
 
   // Context Menu state (Right-click only)
   const [contextMenu, setContextMenu] = useState<{
@@ -93,15 +98,6 @@ export const CanvasEditor: React.FC = React.memo(() => {
     strokeWidth?: number;
     isRightClick?: boolean;
   } | null>(null);
-
-  const isSpacePressedRef = useRef<boolean>(false);
-  const isPanningRef = useRef<boolean>(false);
-  const panStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-  const panOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-
-  // Resizing state
-  const isResizingRef = useRef<boolean>(false);
-  const resizeStartPos = useRef<{ x: number; y: number; w: number; h: number }>({ x: 0, y: 0, w: 800, h: 800 });
 
 
 
@@ -187,528 +183,27 @@ export const CanvasEditor: React.FC = React.memo(() => {
     if (!overlay) return;
     const ctx = overlay.getContext('2d');
     if (!ctx) return;
-    ctx.clearRect(0, 0, overlay.width, overlay.height);
 
-    const tool = activeTool;
-    const curColor = strokeColor;
-    const curWidth = strokeWidth;
-    const curCap = strokeCap;
-    const curJoin = strokeJoin;
-    const curEraserSize = eraserSize;
-
-    // 1. Eraser Tool: draw circular eraser indicator
-    if (tool === 'eraser' && hoverPosRef.current) {
-      const { x, y } = hoverPosRef.current;
-      const radius = curEraserSize / 2;
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(x, y, radius, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(239, 68, 68, 0.16)';
-      ctx.fill();
-      ctx.strokeStyle = '#ef4444';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-
-      // Center crosshair
-      ctx.beginPath();
-      ctx.moveTo(x - 3, y);
-      ctx.lineTo(x + 3, y);
-      ctx.moveTo(x, y - 3);
-      ctx.lineTo(x, y + 3);
-      ctx.strokeStyle = '#b91c1c';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.restore();
-      return;
-    }
-
-    // 1b. Brush Tool: draw circular brush indicator matching exact strokeWidth
-    if (tool === 'brush' && hoverPosRef.current) {
-      const { x, y } = hoverPosRef.current;
-      const radius = Math.max(1.5, curWidth / 2);
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(x, y, radius, 0, Math.PI * 2);
-      ctx.fillStyle = curColor ? `${curColor}14` : 'rgba(79, 70, 229, 0.08)';
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-      ctx.lineWidth = 2.5;
-      ctx.stroke();
-      ctx.strokeStyle = '#0f172a';
-      ctx.lineWidth = 1.2;
-      ctx.stroke();
-
-      // Center precision point
-      ctx.beginPath();
-      ctx.arc(x, y, 1, 0, Math.PI * 2);
-      ctx.fillStyle = '#0f172a';
-      ctx.fill();
-      ctx.restore();
-      return;
-    }
-
-    // 2. Illustrator Pen Tool overlay (drawing new stroke)
-    if (tool === 'pen') {
-      const nodes = penNodesRef.current;
-      const hover = hoverPosRef.current;
-      const isNearStart = isNearStartRef.current;
-
-      if (nodes.length > 0 || hover) {
-        ctx.save();
-
-        if (penMode === 'sharp') {
-          // --- SHARP PEN MODE: Polyline / Corner Segments ---
-          if (nodes.length >= 1) {
-            ctx.beginPath();
-            ctx.moveTo(nodes[0].x, nodes[0].y);
-            for (let i = 1; i < nodes.length; i++) {
-              ctx.lineTo(nodes[i].x, nodes[i].y);
-            }
-            ctx.strokeStyle = curColor;
-            ctx.lineWidth = curWidth;
-            ctx.lineCap = curCap;
-            ctx.lineJoin = 'miter';
-            ctx.stroke();
-          }
-
-          // Sharp rubberband line to cursor
-          if (nodes.length > 0 && hover && activeDragIndexRef.current === null) {
-            const last = nodes[nodes.length - 1];
-            const target = isNearStart ? nodes[0] : hover;
-
-            ctx.beginPath();
-            ctx.moveTo(last.x, last.y);
-            ctx.lineTo(target.x, target.y);
-            ctx.strokeStyle = isNearStart ? '#10b981' : '#f59e0b';
-            ctx.lineWidth = 2;
-            ctx.setLineDash([4, 4]);
-            ctx.stroke();
-            ctx.setLineDash([]);
-          }
-
-          // Draw diamond corner anchors
-          nodes.forEach((node, idx) => {
-            const isFirst = idx === 0;
-            const sz = isFirst && isNearStart ? 8 : 6;
-            ctx.save();
-            ctx.translate(node.x, node.y);
-            ctx.rotate(Math.PI / 4);
-            ctx.beginPath();
-            ctx.rect(-sz / 2, -sz / 2, sz, sz);
-            ctx.fillStyle = isFirst && isNearStart ? '#10b981' : '#ffffff';
-            ctx.fill();
-            ctx.strokeStyle = isFirst && isNearStart ? '#047857' : '#d97706';
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
-            ctx.restore();
-          });
-        } else {
-          // --- ROUNDED PEN MODE: Continuous Smooth Circular Curvature (Illustrator Curvature Tool) ---
-          if (isNearStart && nodes.length >= 2) {
-            // Path closure preview: compute seamless closed circular handles
-            const closedNodes = autoComputeSmoothCircularHandles(
-              nodes.map((n) => ({ ...n })),
-              true
-            );
-
-            ctx.beginPath();
-            ctx.moveTo(closedNodes[0].x, closedNodes[0].y);
-            for (let i = 1; i < closedNodes.length; i++) {
-              const prev = closedNodes[i - 1];
-              const curr = closedNodes[i];
-              const cp1 = prev.handleOut || { x: prev.x, y: prev.y };
-              const cp2 = curr.handleIn || { x: curr.x, y: curr.y };
-              ctx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, curr.x, curr.y);
-            }
-            const last = closedNodes[closedNodes.length - 1];
-            const first = closedNodes[0];
-            const cp1 = last.handleOut || { x: last.x, y: last.y };
-            const cp2 = first.handleIn || { x: first.x, y: first.y };
-            ctx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, first.x, first.y);
-
-            ctx.strokeStyle = '#10b981';
-            ctx.lineWidth = curWidth;
-            ctx.lineCap = curCap;
-            ctx.lineJoin = curJoin;
-            ctx.stroke();
-
-            // Draw anchor points for closure
-            closedNodes.forEach((node, idx) => {
-              const isFirst = idx === 0;
-              ctx.beginPath();
-              ctx.arc(node.x, node.y, isFirst ? 5 : 4, 0, Math.PI * 2);
-              ctx.fillStyle = isFirst ? '#10b981' : '#ffffff';
-              ctx.fill();
-              ctx.strokeStyle = isFirst ? '#047857' : '#2563eb';
-              ctx.lineWidth = 1.5;
-              ctx.stroke();
-
-              if (isFirst) {
-                // Circle indicator next to cursor/anchor for "Close Path"
-                ctx.beginPath();
-                ctx.arc(node.x + 12, node.y - 12, 4.5, 0, Math.PI * 2);
-                ctx.strokeStyle = '#10b981';
-                ctx.lineWidth = 1.8;
-                ctx.stroke();
-              }
-            });
-          } else {
-            // Open continuous circular curvature
-            const computedNodes = autoComputeSmoothCircularHandles(
-              nodes.map((n) => ({ ...n })),
-              false
-            );
-
-            // 1. Placed solid path
-            if (computedNodes.length >= 2) {
-              ctx.beginPath();
-              ctx.moveTo(computedNodes[0].x, computedNodes[0].y);
-              for (let i = 1; i < computedNodes.length; i++) {
-                const prev = computedNodes[i - 1];
-                const curr = computedNodes[i];
-                const cp1 = prev.handleOut || { x: prev.x, y: prev.y };
-                const cp2 = curr.handleIn || { x: curr.x, y: curr.y };
-                ctx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, curr.x, curr.y);
-              }
-              ctx.strokeStyle = curColor;
-              ctx.lineWidth = curWidth;
-              ctx.lineCap = curCap;
-              ctx.lineJoin = curJoin;
-              ctx.stroke();
-            }
-
-            // 2. Continuous circular rubberband curve to mouse cursor
-            if (nodes.length > 0 && hover && activeDragIndexRef.current === null) {
-              const extNodes = autoComputeSmoothCircularHandles(
-                [
-                  ...nodes.map((n) => ({ ...n })),
-                  { x: hover.x, y: hover.y, type: 'smooth' as const },
-                ],
-                false
-              );
-
-              const prev = extNodes[extNodes.length - 2];
-              const curr = extNodes[extNodes.length - 1];
-              const cp1 = prev.handleOut || { x: prev.x, y: prev.y };
-              const cp2 = curr.handleIn || { x: curr.x, y: curr.y };
-
-              ctx.beginPath();
-              ctx.moveTo(prev.x, prev.y);
-              ctx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, curr.x, curr.y);
-              ctx.strokeStyle = '#3b82f6';
-              ctx.lineWidth = 2;
-              ctx.setLineDash([4, 4]);
-              ctx.stroke();
-              ctx.setLineDash([]);
-            }
-
-            // 3. Tangent handles & anchor points
-            computedNodes.forEach((node, idx) => {
-              if (node.handleIn) {
-                ctx.beginPath();
-                ctx.moveTo(node.x, node.y);
-                ctx.lineTo(node.handleIn.x, node.handleIn.y);
-                ctx.strokeStyle = '#93c5fd';
-                ctx.lineWidth = 1.2;
-                ctx.stroke();
-
-                ctx.beginPath();
-                ctx.arc(node.handleIn.x, node.handleIn.y, 3.5, 0, Math.PI * 2);
-                ctx.fillStyle = '#3b82f6';
-                ctx.fill();
-              }
-
-              if (node.handleOut) {
-                ctx.beginPath();
-                ctx.moveTo(node.x, node.y);
-                ctx.lineTo(node.handleOut.x, node.handleOut.y);
-                ctx.strokeStyle = '#93c5fd';
-                ctx.lineWidth = 1.2;
-                ctx.stroke();
-
-                ctx.beginPath();
-                ctx.arc(node.handleOut.x, node.handleOut.y, 3.5, 0, Math.PI * 2);
-                ctx.fillStyle = '#3b82f6';
-                ctx.fill();
-              }
-
-              const isFirst = idx === 0;
-              const isCorner = node.type === 'corner';
-
-              if (isCorner) {
-                // Diamond for corner anchors
-                const sz = 6;
-                ctx.save();
-                ctx.translate(node.x, node.y);
-                ctx.rotate(Math.PI / 4);
-                ctx.beginPath();
-                ctx.rect(-sz / 2, -sz / 2, sz, sz);
-                ctx.fillStyle = '#ffffff';
-                ctx.fill();
-                ctx.strokeStyle = '#d97706';
-                ctx.lineWidth = 1.5;
-                ctx.stroke();
-                ctx.restore();
-              } else {
-                // Smooth circular anchor
-                ctx.beginPath();
-                ctx.arc(node.x, node.y, isFirst ? 5 : 4, 0, Math.PI * 2);
-                ctx.fillStyle = '#ffffff';
-                ctx.fill();
-                ctx.strokeStyle = '#2563eb';
-                ctx.lineWidth = 1.5;
-                ctx.stroke();
-              }
-            });
-          }
-        }
-
-        ctx.restore();
-      }
-    }
-
-    // 3. Illustrator Direct Selection & Node Editing Overlay (A tool & path editing)
-    if (
-      activeTool === 'direct-select' ||
-      (activeTool === 'pen' && penNodesRef.current.length === 0 && selectedPathObjRef.current)
-    ) {
-      const subpaths = editableSubpathsRef.current;
-      const selectedIds = selectedNodeIdsRef.current;
-
-      if (subpaths.length > 0) {
-        ctx.save();
-
-        // A. Draw crisp path contour outline indicator
-        subpaths.forEach((sub) => {
-          if (sub.nodes.length >= 2) {
-            ctx.beginPath();
-            ctx.moveTo(sub.nodes[0].x, sub.nodes[0].y);
-            for (let i = 1; i < sub.nodes.length; i++) {
-              const prev = sub.nodes[i - 1];
-              const curr = sub.nodes[i];
-              if (prev.handleOut || curr.handleIn) {
-                const cp1 = prev.handleOut || { x: prev.x, y: prev.y };
-                const cp2 = curr.handleIn || { x: curr.x, y: curr.y };
-                ctx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, curr.x, curr.y);
-              } else {
-                ctx.lineTo(curr.x, curr.y);
-              }
-            }
-            if (sub.isClosed) {
-              const last = sub.nodes[sub.nodes.length - 1];
-              const first = sub.nodes[0];
-              if (last.handleOut || first.handleIn) {
-                const cp1 = last.handleOut || { x: last.x, y: last.y };
-                const cp2 = first.handleIn || { x: first.x, y: first.y };
-                ctx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, first.x, first.y);
-              } else {
-                ctx.lineTo(first.x, first.y);
-              }
-            }
-            ctx.strokeStyle = '#6366f1';
-            ctx.lineWidth = 1.2;
-            ctx.setLineDash([3, 3]);
-            ctx.stroke();
-            ctx.setLineDash([]);
-          }
-        });
-
-        // B. Draw Bézier Handles and Grips
-        subpaths.forEach((sub) => {
-          sub.nodes.forEach((node) => {
-            const isSelected = selectedIds.has(node.id);
-
-            // Handle In
-            if (node.handleIn) {
-              ctx.beginPath();
-              ctx.moveTo(node.x, node.y);
-              ctx.lineTo(node.handleIn.x, node.handleIn.y);
-              ctx.strokeStyle = '#60a5fa';
-              ctx.lineWidth = 1.2;
-              ctx.stroke();
-
-              ctx.beginPath();
-              ctx.arc(node.handleIn.x, node.handleIn.y, 3.5, 0, Math.PI * 2);
-              ctx.fillStyle = '#3b82f6';
-              ctx.fill();
-              ctx.strokeStyle = '#ffffff';
-              ctx.lineWidth = 1.2;
-              ctx.stroke();
-            }
-
-            // Handle Out
-            if (node.handleOut) {
-              ctx.beginPath();
-              ctx.moveTo(node.x, node.y);
-              ctx.lineTo(node.handleOut.x, node.handleOut.y);
-              ctx.strokeStyle = '#60a5fa';
-              ctx.lineWidth = 1.2;
-              ctx.stroke();
-
-              ctx.beginPath();
-              ctx.arc(node.handleOut.x, node.handleOut.y, 3.5, 0, Math.PI * 2);
-              ctx.fillStyle = '#3b82f6';
-              ctx.fill();
-              ctx.strokeStyle = '#ffffff';
-              ctx.lineWidth = 1.2;
-              ctx.stroke();
-            }
-
-            // C. Draw Anchor Point (Square if smooth, Diamond if corner)
-            const isHovered =
-              hoveredNodeInfoRef.current?.nodeIndex !== undefined &&
-              sub.nodes[hoveredNodeInfoRef.current.nodeIndex]?.id === node.id &&
-              hoveredNodeInfoRef.current.type === 'anchor';
-            const sz = isHovered ? 9 : 7;
-
-            ctx.save();
-            ctx.translate(node.x, node.y);
-            if (node.type === 'corner') {
-              ctx.rotate(Math.PI / 4);
-            }
-
-            ctx.beginPath();
-            ctx.rect(-sz / 2, -sz / 2, sz, sz);
-            ctx.fillStyle = isSelected ? '#2563eb' : '#ffffff';
-            ctx.fill();
-            ctx.strokeStyle = isSelected ? '#1e3a8a' : '#2563eb';
-            ctx.lineWidth = isSelected ? 2 : 1.5;
-            ctx.stroke();
-
-            if (isSelected) {
-              ctx.beginPath();
-              ctx.rect(-sz / 2 + 1, -sz / 2 + 1, sz - 2, sz - 2);
-              ctx.strokeStyle = '#ffffff';
-              ctx.lineWidth = 1;
-              ctx.stroke();
-            }
-
-            ctx.restore();
-          });
-        });
-
-        ctx.restore();
-      }
-
-      // D. Hovered Segment Insertion Indicator
-      if (hoveredSegmentRef.current) {
-        const { point } = hoveredSegmentRef.current;
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(point.x, point.y, 4.5, 0, Math.PI * 2);
-        ctx.fillStyle = '#10b981';
-        ctx.fill();
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.moveTo(point.x - 3, point.y);
-        ctx.lineTo(point.x + 3, point.y);
-        ctx.moveTo(point.x, point.y - 3);
-        ctx.lineTo(point.x, point.y + 3);
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      // E. Marquee Selection Box
-      if (marqueeBoxRef.current) {
-        const { start, current } = marqueeBoxRef.current;
-        const x = Math.min(start.x, current.x);
-        const y = Math.min(start.y, current.y);
-        const w = Math.abs(current.x - start.x);
-        const h = Math.abs(current.y - start.y);
-
-        ctx.save();
-        ctx.fillStyle = 'rgba(59, 130, 246, 0.12)';
-        ctx.fillRect(x, y, w, h);
-        ctx.strokeStyle = '#3b82f6';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([4, 4]);
-        ctx.strokeRect(x, y, w, h);
-        ctx.restore();
-      }
-    }
-  }, [activeTool, penMode, strokeColor, strokeWidth, strokeCap, strokeJoin, eraserSize]);
-
-  // Helper to serialize an individual Fabric object into a VectorPathData object
-  const serializeFabricPathObject = useCallback((obj: any, idx = 0): VectorPathData | null => {
-    if (!(obj instanceof Path) || !obj.path) return null;
-    const pathSegments = obj.path;
-    const mat = obj.calcTransformMatrix();
-    const offsetX = obj.pathOffset?.x ?? 0;
-    const offsetY = obj.pathOffset?.y ?? 0;
-
-    const hasTransform =
-      Math.abs((obj.left ?? 0) - offsetX) > 0.01 ||
-      Math.abs((obj.top ?? 0) - offsetY) > 0.01 ||
-      (obj.scaleX !== undefined && Math.abs(obj.scaleX - 1) > 0.001) ||
-      (obj.scaleY !== undefined && Math.abs(obj.scaleY - 1) > 0.001) ||
-      (obj.angle !== undefined && Math.abs(obj.angle) > 0.01) ||
-      obj.flipX ||
-      obj.flipY;
-
-    let finalSegments = pathSegments;
-    if (hasTransform) {
-      finalSegments = pathSegments.map((seg: any) => {
-        const cmd = seg[0];
-        if (cmd === 'M' || cmd === 'L') {
-          const pt = util.transformPoint({ x: seg[1] - offsetX, y: seg[2] - offsetY }, mat);
-          return [cmd, Math.round(pt.x * 10) / 10, Math.round(pt.y * 10) / 10];
-        } else if (cmd === 'C') {
-          const pt1 = util.transformPoint({ x: seg[1] - offsetX, y: seg[2] - offsetY }, mat);
-          const pt2 = util.transformPoint({ x: seg[3] - offsetX, y: seg[4] - offsetY }, mat);
-          const pt = util.transformPoint({ x: seg[5] - offsetX, y: seg[6] - offsetY }, mat);
-          return [
-            cmd,
-            Math.round(pt1.x * 10) / 10, Math.round(pt1.y * 10) / 10,
-            Math.round(pt2.x * 10) / 10, Math.round(pt2.y * 10) / 10,
-            Math.round(pt.x * 10) / 10, Math.round(pt.y * 10) / 10,
-          ];
-        } else if (cmd === 'Q') {
-          const pt1 = util.transformPoint({ x: seg[1] - offsetX, y: seg[2] - offsetY }, mat);
-          const pt = util.transformPoint({ x: seg[3] - offsetX, y: seg[4] - offsetY }, mat);
-          return [
-            cmd,
-            Math.round(pt1.x * 10) / 10, Math.round(pt1.y * 10) / 10,
-            Math.round(pt.x * 10) / 10, Math.round(pt.y * 10) / 10,
-          ];
-        }
-        return seg;
-      });
-    }
-
-    const pathStr = fabricSegmentsToPathString(finalSegments);
-    const objId = (obj as any).id || `path_${Date.now()}_${idx}`;
-    (obj as any).id = objId;
-    return {
-      id: objId,
-      pathString: pathStr,
-      strokeWidth: (obj.strokeWidth as number) || 16,
-      strokeColor: (obj.stroke as string) || '#0f172a',
-      fillColor: (obj.fill as string) || undefined,
-      strokeLineCap: (obj.strokeLineCap as any) || 'round',
-      strokeLineJoin: (obj.strokeLineJoin as any) || 'round',
-    };
-  }, []);
-
-  // Serialize current fabric canvas paths into VectorPathData[]
-  const serializeCanvasPaths = useCallback((): VectorPathData[] => {
-    const canvas = fabricCanvasRef.current;
-    if (!canvas) return [];
-
-    const objects = canvas.getObjects();
-    const result: VectorPathData[] = [];
-
-    objects.forEach((obj, idx) => {
-      const serialized = serializeFabricPathObject(obj, idx);
-      if (serialized) result.push(serialized);
+    renderCanvasOverlay(ctx, overlay.width, overlay.height, {
+      activeTool,
+      penMode,
+      strokeColor,
+      strokeWidth,
+      strokeCap,
+      strokeJoin,
+      eraserSize,
+      hoverPos: hoverPosRef.current,
+      penNodes: penNodesRef.current,
+      activeDragIndex: activeDragIndexRef.current,
+      isNearStart: isNearStartRef.current,
+      selectedPathExists: Boolean(selectedPathObjRef.current),
+      editableSubpaths: editableSubpathsRef.current,
+      selectedNodeIds: selectedNodeIdsRef.current,
+      hoveredNodeInfo: hoveredNodeInfoRef.current,
+      hoveredSegment: hoveredSegmentRef.current,
+      marqueeBox: marqueeBoxRef.current,
     });
-
-    return result;
-  }, [serializeFabricPathObject]);
+  }, [activeTool, penMode, strokeColor, strokeWidth, strokeCap, strokeJoin, eraserSize]);
 
   // Debounced sync to store for 60fps drawing
   const syncToStoreDebounced = useCallback(() => {
@@ -718,11 +213,11 @@ export const CanvasEditor: React.FC = React.memo(() => {
     }
 
     debounceTimerRef.current = setTimeout(() => {
-      const paths = serializeCanvasPaths();
+      const paths = serializeCanvasPaths(fabricCanvasRef.current);
       isInternalUpdateRef.current = true;
       updateActiveGlyphPaths(paths, true);
     }, 150);
-  }, [serializeCanvasPaths, updateActiveGlyphPaths]);
+  }, [updateActiveGlyphPaths]);
 
   // Direct Selection: Loads a Fabric Path into editable subpaths
   const loadPathForNodeEditing = useCallback(
@@ -940,139 +435,23 @@ export const CanvasEditor: React.FC = React.memo(() => {
     [renderOverlay, syncToStoreDebounced]
   );
 
-  // 1. COPY ACTION
-  const handleCopy = useCallback(() => {
-    const canvas = fabricCanvasRef.current;
-    if (!canvas) return;
+  // Canvas Viewport & Navigation controls (Pan, Spacebar, Wheel Zoom, Canvas Resizing)
+  const {
+    isSpaceHeld,
+    isPanning,
+    startPan,
+    handleResizeMouseDown,
+    handleWorkspaceMouseDown,
+  } = useCanvasViewport({
+    containerRef,
+    fabricCanvasRef,
+  });
 
-    const activeObjs = canvas.getActiveObjects();
-    let pathsToCopy: VectorPathData[] = [];
-
-    if (activeObjs.length > 0) {
-      activeObjs.forEach((obj, idx) => {
-        const serialized = serializeFabricPathObject(obj, idx);
-        if (serialized) pathsToCopy.push(serialized);
-      });
-    } else {
-      pathsToCopy = currentGlyph?.paths ? [...currentGlyph.paths] : [];
-    }
-
-    if (pathsToCopy.length === 0) {
-      useUIStore.getState().showToast('No strokes to copy on this canvas.');
-      return;
-    }
-
-    useGlyphStore.getState().copyPaths(pathsToCopy);
-    useUIStore.getState().showToast(
-      `Copied ${pathsToCopy.length} stroke${pathsToCopy.length > 1 ? 's' : ''} from '${currentGlyph?.character || 'ಅ'}'. Switch to any letter and press Ctrl+V to paste!`
-    );
-  }, [currentGlyph, serializeFabricPathObject]);
-
-  // 2. PASTE ACTION
-  const handlePaste = useCallback(() => {
-    const canvas = fabricCanvasRef.current;
-    if (!canvas) return;
-    const clip = useGlyphStore.getState().clipboard;
-    if (!clip || clip.paths.length === 0) {
-      useUIStore.getState().showToast('Clipboard is empty! Copy strokes with Ctrl+C first.');
-      return;
-    }
-
-    const isSameGlyph = activeUnicode === clip.sourceUnicode;
-    const dx = isSameGlyph ? 24 : 0;
-    const dy = isSameGlyph ? 24 : 0;
-
-    const newlyAdded: FabricObject[] = [];
-    clip.paths.forEach((p, idx) => {
-      try {
-        const translatedStr = (dx !== 0 || dy !== 0) ? translateSVGPathString(p.pathString, dx, dy) : p.pathString;
-        const pathObj = new Path(translatedStr, {
-          stroke: p.fillColor ? undefined : (p.strokeColor || strokeColor),
-          strokeWidth: p.fillColor ? 0 : (p.strokeWidth || 16),
-          fill: p.fillColor || undefined,
-          strokeLineCap: p.strokeLineCap || 'round',
-          strokeLineJoin: p.strokeLineJoin || 'round',
-          selectable: activeTool === 'select',
-          evented: true,
-        });
-        (pathObj as any).id = `pasted_${Date.now()}_${idx}`;
-        canvas.add(pathObj);
-        newlyAdded.push(pathObj);
-      } catch (e) {
-        console.warn('Failed to paste path:', e);
-      }
-    });
-
-    if (newlyAdded.length > 0) {
-      canvas.discardActiveObject();
-      if (newlyAdded.length === 1) {
-        canvas.setActiveObject(newlyAdded[0]);
-      } else {
-        const sel = new ActiveSelection(newlyAdded, { canvas });
-        canvas.setActiveObject(sel);
-      }
-      canvas.requestRenderAll();
-      syncToStoreDebounced();
-
-      useUIStore.getState().showToast(
-        `Pasted ${newlyAdded.length} stroke${newlyAdded.length > 1 ? 's' : ''} from '${clip.sourceCharacter}' into '${currentGlyph?.character || 'ಅ'}'!`
-      );
-    }
-  }, [activeUnicode, currentGlyph, strokeColor, activeTool, syncToStoreDebounced]);
-
-  // 3. DUPLICATE ACTION
-  const handleDuplicate = useCallback(() => {
-    const canvas = fabricCanvasRef.current;
-    if (!canvas) return;
-    const activeObjs = canvas.getActiveObjects();
-    if (activeObjs.length === 0) return;
-
-    const newlyAdded: FabricObject[] = [];
-    activeObjs.forEach((obj, idx) => {
-      const serialized = serializeFabricPathObject(obj, idx);
-      if (serialized) {
-        const translated = translateSVGPathString(serialized.pathString, 20, 20);
-        const dupObj = new Path(translated, {
-          stroke: serialized.fillColor ? undefined : serialized.strokeColor,
-          strokeWidth: serialized.fillColor ? 0 : serialized.strokeWidth,
-          fill: serialized.fillColor,
-          strokeLineCap: serialized.strokeLineCap,
-          strokeLineJoin: serialized.strokeLineJoin,
-          selectable: true,
-          evented: true,
-        });
-        (dupObj as any).id = `dup_${Date.now()}_${idx}`;
-        canvas.add(dupObj);
-        newlyAdded.push(dupObj);
-      }
-    });
-
-    if (newlyAdded.length > 0) {
-      canvas.discardActiveObject();
-      if (newlyAdded.length === 1) {
-        canvas.setActiveObject(newlyAdded[0]);
-      } else {
-        const sel = new ActiveSelection(newlyAdded, { canvas });
-        canvas.setActiveObject(sel);
-      }
-      canvas.requestRenderAll();
-      syncToStoreDebounced();
-      useUIStore.getState().showToast(`Duplicated ${newlyAdded.length} stroke${newlyAdded.length > 1 ? 's' : ''}`);
-    }
-  }, [serializeFabricPathObject, syncToStoreDebounced]);
-
-  // 4. CUT ACTION
-  const handleCut = useCallback(() => {
-    handleCopy();
-    const canvas = fabricCanvasRef.current;
-    if (!canvas) return;
-    const activeObjs = canvas.getActiveObjects();
-    activeObjs.forEach((obj) => canvas.remove(obj));
-    canvas.discardActiveObject();
-    canvas.requestRenderAll();
-    syncToStoreDebounced();
-    setContextMenu(null);
-  }, [handleCopy, syncToStoreDebounced]);
+  // Global canvas clipboard actions (Copy, Paste, Cut, Duplicate)
+  const { handleCopy, handlePaste, handleCut, handleDuplicate } = useCanvasClipboard({
+    fabricCanvasRef,
+    syncToStoreDebounced,
+  });
 
   // 5. DELETE ACTION
   const handleDelete = useCallback(() => {
@@ -1466,15 +845,8 @@ export const CanvasEditor: React.FC = React.memo(() => {
       isMouseDown = true;
 
       // Pan with Space held, Pan tool, or Middle mouse button
-      if (isSpacePressedRef.current || tool === 'pan' || eAny?.button === 1) {
-        isPanningRef.current = true;
-        panStartPosRef.current = {
-          x: (eAny?.clientX ?? 0) - panOffsetRef.current.x,
-          y: (eAny?.clientY ?? 0) - panOffsetRef.current.y,
-        };
-        if (canvas.upperCanvasEl) {
-          canvas.upperCanvasEl.style.cursor = 'grabbing';
-        }
+      if (isSpaceHeld || tool === 'pan' || eAny?.button === 1) {
+        startPan(eAny?.clientX ?? 0, eAny?.clientY ?? 0);
         return;
       }
 
@@ -1635,11 +1007,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
       const pointer =
         opt.scenePoint || (canvas as any).getScenePoint?.(opt.e) || { x: eAny?.offsetX ?? 0, y: eAny?.offsetY ?? 0 };
 
-      if (isPanningRef.current) {
-        const nx = (eAny?.clientX ?? 0) - panStartPosRef.current.x;
-        const ny = (eAny?.clientY ?? 0) - panStartPosRef.current.y;
-        panOffsetRef.current = { x: nx, y: ny };
-        useUIStore.getState().setPan(nx, ny);
+      if (isPanning) {
         return;
       }
 
@@ -1862,19 +1230,8 @@ export const CanvasEditor: React.FC = React.memo(() => {
       isMouseDown = false;
       lastEraserPosRef.current = null;
 
-      if (isPanningRef.current) {
-        isPanningRef.current = false;
-        if (canvas.upperCanvasEl) {
-          canvas.upperCanvasEl.style.cursor = isSpacePressedRef.current
-            ? 'grab'
-            : tool === 'pan'
-            ? 'grab'
-            : tool === 'brush' || tool === 'eraser'
-            ? 'none'
-            : tool === 'pen'
-            ? 'crosshair'
-            : 'default';
-        }
+      if (isPanning) {
+        return;
       }
 
       if (tool === 'direct-select') {
@@ -2182,10 +1539,37 @@ export const CanvasEditor: React.FC = React.memo(() => {
     }
   }, [strokeWidth, strokeColor, strokeCap, strokeJoin, activeTool, syncToStoreDebounced]);
 
+  const prevUnicodeRef = useRef<string>(activeUnicode);
+
   // Rehydrate glyph paths when active character changes
   useEffect(() => {
     const canvas = fabricCanvasRef.current;
     if (!canvas || !currentGlyph) return;
+
+    // If switching between different Unicode glyphs, synchronously flush pending strokes for previous glyph first
+    if (prevUnicodeRef.current && prevUnicodeRef.current !== activeUnicode) {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+        const pendingPaths = serializeCanvasPaths(canvas);
+        const prevCode = prevUnicodeRef.current;
+        const prevGlyph = useGlyphStore.getState().glyphs[prevCode];
+        if (prevGlyph) {
+          useGlyphStore.setState((s) => ({
+            glyphs: {
+              ...s.glyphs,
+              [prevCode]: {
+                ...prevGlyph,
+                paths: cloneVectorPaths(pendingPaths),
+                isEdited: pendingPaths.length > 0,
+                lastModified: Date.now(),
+              },
+            },
+          }));
+        }
+      }
+    }
+    prevUnicodeRef.current = activeUnicode;
 
     // Ignore canvas-initiated updates so strokes are never duplicated or cleared mid-edit
     if (isInternalUpdateRef.current) {
@@ -2207,20 +1591,12 @@ export const CanvasEditor: React.FC = React.memo(() => {
 
     if (currentGlyph.paths && currentGlyph.paths.length > 0) {
       currentGlyph.paths.forEach((p) => {
-        try {
-          const pathObj = new Path(p.pathString, {
-            stroke: p.fillColor ? undefined : (p.strokeColor || strokeColor),
-            strokeWidth: p.fillColor ? 0 : (p.strokeWidth || 16),
-            fill: p.fillColor || undefined,
-            strokeLineCap: p.strokeLineCap || 'round',
-            strokeLineJoin: p.strokeLineJoin || 'round',
-            selectable: activeTool === 'select',
-            evented: true,
-          });
-          (pathObj as any).id = p.id;
+        const pathObj = rehydrateFabricPath(p, {
+          fallbackColor: strokeColor,
+          selectable: activeTool === 'select',
+        });
+        if (pathObj) {
           canvas.add(pathObj);
-        } catch (e) {
-          console.warn('Failed to rehydrate vector path:', e);
         }
       });
     }
@@ -2303,185 +1679,6 @@ export const CanvasEditor: React.FC = React.memo(() => {
     return () => window.removeEventListener('lipi:edit-reference-font', handleTrace);
   }, [editReferenceFont]);
 
-  // Global canvas shortcuts & toolbar actions (Copy, Paste, Cut, Duplicate across letters)
-  useEffect(() => {
-    const onCopy = () => handleCopy();
-    const onPaste = () => handlePaste();
-    const onCut = () => handleCut();
-    const onDuplicate = () => handleDuplicate();
-
-    window.addEventListener('lipi:canvas-copy', onCopy);
-    window.addEventListener('lipi:canvas-paste', onPaste);
-    window.addEventListener('lipi:canvas-cut', onCut);
-    window.addEventListener('lipi:canvas-duplicate', onDuplicate);
-
-    return () => {
-      window.removeEventListener('lipi:canvas-copy', onCopy);
-      window.removeEventListener('lipi:canvas-paste', onPaste);
-      window.removeEventListener('lipi:canvas-cut', onCut);
-      window.removeEventListener('lipi:canvas-duplicate', onDuplicate);
-    };
-  }, [handleCopy, handlePaste, handleCut, handleDuplicate]);
-
-  // Handle Drag Resizing of the Canvas Card
-  const handleResizeMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    isResizingRef.current = true;
-    resizeStartPos.current = {
-      x: e.clientX,
-      y: e.clientY,
-      w: canvasWidth,
-      h: canvasHeight,
-    };
-
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      if (!isResizingRef.current) return;
-      const deltaX = (moveEvent.clientX - resizeStartPos.current.x) / zoom;
-      const deltaY = (moveEvent.clientY - resizeStartPos.current.y) / zoom;
-      const newWidth = Math.round(resizeStartPos.current.w + deltaX);
-      const newHeight = Math.round(resizeStartPos.current.h + deltaY);
-      setCanvasSize(newWidth, newHeight);
-    };
-
-    const handleMouseUp = () => {
-      isResizingRef.current = false;
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-  };
-
-  // Keep panOffsetRef in sync with store
-  useEffect(() => {
-    panOffsetRef.current = { x: panX, y: panY };
-  }, [panX, panY]);
-
-  // Window-level mousemove & mouseup for smooth canvas panning across entire screen
-  useEffect(() => {
-    const handleGlobalMouseMove = (e: MouseEvent) => {
-      if (isPanningRef.current) {
-        const nx = e.clientX - panStartPosRef.current.x;
-        const ny = e.clientY - panStartPosRef.current.y;
-        panOffsetRef.current = { x: nx, y: ny };
-        useUIStore.getState().setPan(nx, ny);
-      }
-    };
-
-    const handleGlobalMouseUp = () => {
-      if (isPanningRef.current) {
-        isPanningRef.current = false;
-        const canvas = fabricCanvasRef.current;
-        if (canvas?.upperCanvasEl) {
-          canvas.upperCanvasEl.style.cursor = isSpacePressedRef.current
-            ? 'grab'
-            : activeTool === 'pan'
-            ? 'grab'
-            : activeTool === 'brush' || activeTool === 'eraser'
-            ? 'none'
-            : activeTool === 'pen'
-            ? 'crosshair'
-            : 'default';
-        }
-      }
-    };
-
-    window.addEventListener('mousemove', handleGlobalMouseMove);
-    window.addEventListener('mouseup', handleGlobalMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', handleGlobalMouseMove);
-      window.removeEventListener('mouseup', handleGlobalMouseUp);
-    };
-  }, [activeTool]);
-
-  // Spacebar temporary hand/pan tool (Illustrator / Photoshop / Figma standard)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
-        return;
-      }
-
-      if (e.code === 'Space' && !e.repeat) {
-        e.preventDefault();
-        setIsSpaceHeld(true);
-        isSpacePressedRef.current = true;
-        const canvas = fabricCanvasRef.current;
-        if (canvas?.upperCanvasEl) {
-          canvas.upperCanvasEl.style.cursor = 'grab';
-        }
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
-        return;
-      }
-
-      if (e.code === 'Space') {
-        setIsSpaceHeld(false);
-        isSpacePressedRef.current = false;
-        if (!isPanningRef.current) {
-          const canvas = fabricCanvasRef.current;
-          if (canvas?.upperCanvasEl) {
-            canvas.upperCanvasEl.style.cursor =
-              activeTool === 'brush' || activeTool === 'eraser'
-                ? 'none'
-                : activeTool === 'pan'
-                ? 'grab'
-                : activeTool === 'pen'
-                ? 'crosshair'
-                : 'default';
-          }
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [activeTool]);
-
-  // Wheel zoom with Ctrl or Cmd
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const handleWheel = (e: WheelEvent) => {
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        const curZoom = useUIStore.getState().zoom;
-        const delta = e.deltaY > 0 ? -0.12 : 0.12;
-        const newZoom = Math.max(0.3, Math.min(3, Math.round((curZoom + delta) * 100) / 100));
-        useUIStore.getState().setZoom(newZoom);
-      }
-    };
-
-    container.addEventListener('wheel', handleWheel, { passive: false });
-    return () => container.removeEventListener('wheel', handleWheel);
-  }, []);
-
-  const handleWorkspaceMouseDown = (e: React.MouseEvent) => {
-    if (isSpacePressedRef.current || activeTool === 'pan' || e.button === 1) {
-      e.preventDefault();
-      isPanningRef.current = true;
-      panStartPosRef.current = {
-        x: e.clientX - panOffsetRef.current.x,
-        y: e.clientY - panOffsetRef.current.y,
-      };
-      const canvas = fabricCanvasRef.current;
-      if (canvas?.upperCanvasEl) {
-        canvas.upperCanvasEl.style.cursor = 'grabbing';
-      }
-    }
-  };
-
   return (
     <div
       ref={containerRef}
@@ -2532,7 +1729,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
         }}
         className={clsx(
           "relative flex-1 w-full h-full flex items-center justify-center overflow-hidden p-8",
-          (isSpaceHeld || activeTool === 'pan') && (isPanningRef.current ? "cursor-grabbing" : "cursor-grab")
+          (isSpaceHeld || activeTool === 'pan') && (isPanning ? "cursor-grabbing" : "cursor-grab")
         )}
       >
         {/* Kannada Reference Font Options next to canvas top right corner outside */}

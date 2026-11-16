@@ -447,7 +447,7 @@ export const KANNADA_CHARACTERS_LIST: KannadaCharacterDefinition[] = [
     "sampleWordMeaning": "Flower"
   },
   {
-    "unicode": "U+0CDE",
+    "unicode": "U+0CB3",
     "character": "ಳ",
     "name": "KANNADA LETTER LLA",
     "category": "vyanjanagalu",
