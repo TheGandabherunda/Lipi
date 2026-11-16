@@ -438,6 +438,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
   // Canvas Viewport & Navigation controls (Pan, Spacebar, Wheel Zoom, Canvas Resizing)
   const {
     isSpaceHeld,
+    isSpacePressedRef,
     isPanning,
     startPan,
     handleResizeMouseDown,
@@ -842,13 +843,12 @@ export const CanvasEditor: React.FC = React.memo(() => {
       const curPenMode = useUIStore.getState().penMode;
       const pointer =
         opt.scenePoint || (canvas as any).getScenePoint?.(opt.e) || { x: eAny?.offsetX ?? 0, y: eAny?.offsetY ?? 0 };
-      isMouseDown = true;
-
-      // Pan with Space held, Pan tool, or Middle mouse button
-      if (isSpaceHeld || tool === 'pan' || eAny?.button === 1) {
+      // Pan with Space held, Pan tool, or Middle mouse button (never draw or select while panning)
+      if (isSpacePressedRef.current || tool === 'pan' || eAny?.button === 1) {
         startPan(eAny?.clientX ?? 0, eAny?.clientY ?? 0);
         return;
       }
+      isMouseDown = true;
 
       if (tool === 'direct-select') {
         // 1. Check if hit handle grip
@@ -1007,7 +1007,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
       const pointer =
         opt.scenePoint || (canvas as any).getScenePoint?.(opt.e) || { x: eAny?.offsetX ?? 0, y: eAny?.offsetY ?? 0 };
 
-      if (isPanning) {
+      if (isPanning || isSpacePressedRef.current || tool === 'pan') {
         return;
       }
 
@@ -1230,7 +1230,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
       isMouseDown = false;
       lastEraserPosRef.current = null;
 
-      if (isPanning) {
+      if (isPanning || isSpacePressedRef.current || tool === 'pan') {
         return;
       }
 

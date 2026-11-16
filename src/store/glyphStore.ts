@@ -23,6 +23,7 @@ interface GlyphStoreState {
   metadata: LipiProjectMetadata;
   glyphs: Record<string, GlyphData>;
   weightProfiles: Record<number, Record<string, GlyphData>>;
+  weightProfileHistories: Record<number, Record<string, GlyphHistoryStack>>;
   activeUnicode: string;
 
   // Clipboard for copying and pasting strokes across any letter
@@ -71,6 +72,51 @@ export const DEFAULT_METRICS: FontMetrics = {
   rightSideBearing: 50,
 };
 
+/**
+ * Validates and safely repairs font metrics from arbitrary JSON or user input.
+ * Guarantees zero NaNs, positive UPM, and strict ascender > descender ordering.
+ */
+export function sanitizeMetrics(raw: any): FontMetrics {
+  if (!raw || typeof raw !== 'object') {
+    return { ...DEFAULT_METRICS };
+  }
+
+  const parseNum = (val: any, fallback: number, min?: number, max?: number): number => {
+    const n = Number(val);
+    if (!Number.isFinite(n)) return fallback;
+    let res = n;
+    if (min !== undefined) res = Math.max(min, res);
+    if (max !== undefined) res = Math.min(max, res);
+    return res;
+  };
+
+  const unitsPerEm = parseNum(raw.unitsPerEm, DEFAULT_METRICS.unitsPerEm, 16, 16384);
+  let ascender = parseNum(raw.ascender, DEFAULT_METRICS.ascender, -5000, 10000);
+  let descender = parseNum(raw.descender, DEFAULT_METRICS.descender, -5000, 5000);
+  const capHeight = parseNum(raw.capHeight, DEFAULT_METRICS.capHeight, -5000, 10000);
+  const baseline = parseNum(raw.baseline, DEFAULT_METRICS.baseline, -2000, 2000);
+  const mahaprana = parseNum(raw.mahaprana, DEFAULT_METRICS.mahaprana ?? -144, -5000, 5000);
+  const leftSideBearing = parseNum(raw.leftSideBearing, DEFAULT_METRICS.leftSideBearing ?? 50, 0, 2500);
+  const rightSideBearing = parseNum(raw.rightSideBearing, DEFAULT_METRICS.rightSideBearing ?? 50, 0, 2500);
+
+  // Consistency repair: ascender must be strictly above descender
+  if (ascender <= descender) {
+    ascender = DEFAULT_METRICS.ascender;
+    descender = DEFAULT_METRICS.descender;
+  }
+
+  return {
+    unitsPerEm,
+    ascender,
+    capHeight,
+    baseline,
+    descender,
+    mahaprana,
+    leftSideBearing,
+    rightSideBearing,
+  };
+}
+
 const DEFAULT_METADATA: LipiProjectMetadata = {
   name: 'Lipi-Kannada-Font',
   author: 'Kannada Lipikara',
@@ -89,6 +135,11 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
   metadata: DEFAULT_METADATA,
   glyphs: initialClonedGlyphs,
   weightProfiles: { 400: cloneGlyphRecord(initialClonedGlyphs) },
+  weightProfileHistories: {
+    400: {
+      'U+0C85': { stack: [[]], index: 0 },
+    },
+  },
   activeUnicode: 'U+0C85', // Default: 'ಅ'
   glyphHistories: {
     'U+0C85': { stack: [[]], index: 0 },
@@ -438,6 +489,19 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
       }
       updatedProfiles[oldWeight] = cloneGlyphRecord(state.glyphs);
 
+      // Archive current glyphHistories into old weight profile
+      const updatedProfileHistories: Record<number, Record<string, GlyphHistoryStack>> = {
+        ...(state.weightProfileHistories || {}),
+      };
+      const clonedOldHistories: Record<string, GlyphHistoryStack> = {};
+      for (const [code, hist] of Object.entries(state.glyphHistories)) {
+        clonedOldHistories[code] = {
+          stack: hist.stack.map((s) => cloneVectorPaths(s)),
+          index: hist.index,
+        };
+      }
+      updatedProfileHistories[oldWeight] = clonedOldHistories;
+
       // 2. Retrieve or initialize glyphs for target weight safely
       let targetGlyphs = updatedProfiles[newWeight];
       if (!targetGlyphs) {
@@ -445,6 +509,38 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
         updatedProfiles[newWeight] = targetGlyphs;
       } else {
         targetGlyphs = cloneGlyphRecord(targetGlyphs);
+      }
+
+      // Retrieve or initialize glyphHistories for target weight
+      let targetHistories = updatedProfileHistories[newWeight];
+      if (!targetHistories) {
+        targetHistories = {};
+        for (const [code, g] of Object.entries(targetGlyphs)) {
+          targetHistories[code] = {
+            stack: [cloneVectorPaths(g.paths || [])],
+            index: 0,
+          };
+        }
+        updatedProfileHistories[newWeight] = targetHistories;
+      } else {
+        const clonedTargetHistories: Record<string, GlyphHistoryStack> = {};
+        for (const [code, hist] of Object.entries(targetHistories)) {
+          clonedTargetHistories[code] = {
+            stack: hist.stack.map((s) => cloneVectorPaths(s)),
+            index: hist.index,
+          };
+        }
+        targetHistories = clonedTargetHistories;
+      }
+
+      let activeHistory = targetHistories[state.activeUnicode];
+      if (!activeHistory) {
+        const activePaths = targetGlyphs[state.activeUnicode]?.paths || [];
+        activeHistory = {
+          stack: [cloneVectorPaths(activePaths)],
+          index: 0,
+        };
+        targetHistories[state.activeUnicode] = activeHistory;
       }
 
       // 3. Update stroke size according to standard typography weight
@@ -463,10 +559,6 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
         useUIStore.getState().setStrokeWidth(weightWidthMap[newWeight]);
       }
 
-      const activePaths = targetGlyphs[state.activeUnicode]?.paths
-        ? cloneVectorPaths(targetGlyphs[state.activeUnicode].paths)
-        : [];
-
       set({
         metadata: {
           ...state.metadata,
@@ -475,15 +567,11 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
           updatedAt: new Date().toISOString(),
         },
         weightProfiles: updatedProfiles,
+        weightProfileHistories: updatedProfileHistories,
         glyphs: targetGlyphs,
-        glyphHistories: {
-          [state.activeUnicode]: {
-            stack: [cloneVectorPaths(activePaths)],
-            index: 0,
-          },
-        },
-        history: [cloneVectorPaths(activePaths)],
-        historyIndex: 0,
+        glyphHistories: targetHistories,
+        history: activeHistory.stack.map((s) => cloneVectorPaths(s)),
+        historyIndex: activeHistory.index,
       });
       return;
     }
@@ -508,6 +596,11 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
       },
       glyphs: freshGlyphs,
       weightProfiles: { 400: cloneGlyphRecord(freshGlyphs) },
+      weightProfileHistories: {
+        400: {
+          'U+0C85': { stack: [[]], index: 0 },
+        },
+      },
       activeUnicode: 'U+0C85',
       glyphHistories: {
         'U+0C85': { stack: [[]], index: 0 },
@@ -518,7 +611,7 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
   },
 
   serializeLipiProject: () => {
-    const { metadata, glyphs, weightProfiles } = get();
+    const { metadata, glyphs, weightProfiles, glyphHistories } = get();
 
     // Ensure current active weight profile is up-to-date
     const curWeight = metadata.weightClass || 400;
@@ -528,19 +621,28 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
     }
     profilesCopy[curWeight] = cloneGlyphRecord(glyphs);
 
+    // Deep clone per-glyph histories for persistence
+    const serializedHistories: Record<string, { stack: VectorPathData[][]; index: number }> = {};
+    for (const [u, h] of Object.entries(glyphHistories)) {
+      if (h && Array.isArray(h.stack)) {
+        serializedHistories[u] = {
+          stack: h.stack.map((entry) => cloneVectorPaths(entry)),
+          index: h.index,
+        };
+      }
+    }
+
     const payload: LipiFileSchema = {
       format: 'LIPI_PROJECT',
       schemaVersion: '1.1.0',
       metadata: {
         ...metadata,
-        metrics: {
-          ...DEFAULT_METRICS,
-          ...(metadata.metrics || {}),
-        },
+        metrics: sanitizeMetrics(metadata.metrics),
         updatedAt: new Date().toISOString(),
       },
       glyphs: cloneGlyphRecord(glyphs),
       weightProfiles: profilesCopy,
+      glyphHistories: serializedHistories,
     };
     return JSON.stringify(payload, null, 2);
   },
@@ -576,18 +678,8 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
         return { success: false, error: 'Corrupted .lipi file: Missing glyphs directory.' };
       }
 
-      // 2. Validate and sanitize project metrics
-      const rawMetrics = parsed.metadata?.metrics || {};
-      const validatedMetrics: FontMetrics = {
-        unitsPerEm: Number(rawMetrics.unitsPerEm) || DEFAULT_METRICS.unitsPerEm,
-        ascender: Number(rawMetrics.ascender) || DEFAULT_METRICS.ascender,
-        capHeight: Number(rawMetrics.capHeight) || DEFAULT_METRICS.capHeight,
-        baseline: rawMetrics.baseline !== undefined ? Number(rawMetrics.baseline) : DEFAULT_METRICS.baseline,
-        descender: rawMetrics.descender !== undefined ? Number(rawMetrics.descender) : DEFAULT_METRICS.descender,
-        mahaprana: rawMetrics.mahaprana !== undefined ? Number(rawMetrics.mahaprana) : DEFAULT_METRICS.mahaprana,
-        leftSideBearing: rawMetrics.leftSideBearing !== undefined ? Number(rawMetrics.leftSideBearing) : DEFAULT_METRICS.leftSideBearing,
-        rightSideBearing: rawMetrics.rightSideBearing !== undefined ? Number(rawMetrics.rightSideBearing) : DEFAULT_METRICS.rightSideBearing,
-      };
+      // 2. Validate and sanitize project metrics (strictly guarantees zero NaNs, positive UPM, ascender > descender)
+      const validatedMetrics = sanitizeMetrics(parsed.metadata?.metrics);
 
       // 3. Merge loaded glyphs safely over initialKannadaGlyphs so standard characters are never lost
       const mergedGlyphs: Record<string, GlyphData> = cloneGlyphRecord(initialKannadaGlyphs);
@@ -660,18 +752,53 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
         validatedProfiles[currentWeight] = cloneGlyphRecord(mergedGlyphs);
       }
 
-      // 5. Initialize active character and clean per-glyph histories
+      // 5. Initialize active character and restore or create per-glyph histories
       const activeUnicode = parsed.glyphs['U+0C85'] ? 'U+0C85' : Object.keys(mergedGlyphs)[0];
       const activeGlyph = mergedGlyphs[activeUnicode];
-      const initialActivePaths = cloneVectorPaths(activeGlyph?.paths || []);
 
-      const initializedHistories: Record<string, GlyphHistoryStack> = {};
+      const restoredHistories: Record<string, GlyphHistoryStack> = {};
+      const savedHistories = parsed.glyphHistories && typeof parsed.glyphHistories === 'object'
+        ? parsed.glyphHistories
+        : {};
+
       for (const [code, g] of Object.entries(mergedGlyphs)) {
-        initializedHistories[code] = {
-          stack: [cloneVectorPaths(g.paths || [])],
-          index: 0,
-        };
+        const saved = savedHistories[code];
+        if (saved && Array.isArray(saved.stack) && saved.stack.length > 0) {
+          const validatedStack = saved.stack.map((rawPaths) => {
+            if (!Array.isArray(rawPaths)) return [];
+            return rawPaths
+              .filter((p) => p && typeof p === 'object' && typeof p.pathString === 'string')
+              .map((p) => ({
+                id: p.id || `restored_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                pathString: p.pathString,
+                strokeWidth: Number(p.strokeWidth) || 16,
+                strokeColor: p.strokeColor || '#0f172a',
+                fillColor: p.fillColor || undefined,
+                strokeLineCap: p.strokeLineCap || 'round',
+                strokeLineJoin: p.strokeLineJoin || 'round',
+                fabricJSON: p.fabricJSON,
+              }));
+          });
+          const safeIndex = typeof saved.index === 'number'
+            ? Math.max(0, Math.min(validatedStack.length - 1, Math.floor(saved.index)))
+            : validatedStack.length - 1;
+
+          restoredHistories[code] = {
+            stack: validatedStack.length > 0 ? validatedStack : [cloneVectorPaths(g.paths || [])],
+            index: safeIndex,
+          };
+        } else {
+          restoredHistories[code] = {
+            stack: [cloneVectorPaths(g.paths || [])],
+            index: 0,
+          };
+        }
       }
+
+      const activeHistory = restoredHistories[activeUnicode] || {
+        stack: [cloneVectorPaths(activeGlyph?.paths || [])],
+        index: 0,
+      };
 
       set({
         metadata: {
@@ -683,10 +810,13 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
         },
         glyphs: mergedGlyphs,
         weightProfiles: validatedProfiles,
+        weightProfileHistories: {
+          [currentWeight]: restoredHistories,
+        },
         activeUnicode,
-        glyphHistories: initializedHistories,
-        history: [initialActivePaths],
-        historyIndex: 0,
+        glyphHistories: restoredHistories,
+        history: activeHistory.stack.map((entry) => cloneVectorPaths(entry)),
+        historyIndex: activeHistory.index,
       });
 
       return { success: true };

@@ -64,4 +64,23 @@ describe('Font Validation Pipeline', () => {
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes('Failed to parse compiled font binary'))).toBe(true);
   });
+
+  it('rejects standalone prototype fonts when requireShapingTables is true without GSUB', () => {
+    const font = compileFontStandalone(mockMetadata, mockGlyphs, {}, { mapLatinKeys: false });
+    const buffer = font.toArrayBuffer();
+
+    // Standalone prototype mode has no GSUB shaping tables
+    const result = validateCompiledFont(buffer, { requireShapingTables: true });
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes('GSUB'))).toBe(true);
+  });
+
+  it('detects genuine OTTO OpenType CFF format from compiled buffer', () => {
+    const font = compileFontStandalone(mockMetadata, mockGlyphs, {}, { mapLatinKeys: false });
+    const buffer = font.toArrayBuffer();
+
+    const u8 = new Uint8Array(buffer.slice(0, 4));
+    const magic = String.fromCharCode(...u8);
+    expect(magic).toBe('OTTO');
+  });
 });

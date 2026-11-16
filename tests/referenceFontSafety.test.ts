@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import opentype from 'opentype.js';
 import { useGlyphStore } from '../src/store/glyphStore';
 import { useUIStore } from '../src/store/uiStore';
+import { parseUserFontFile } from '../src/utils/fontImporter';
 
 describe('Reference Font Workflow Isolation', () => {
   beforeEach(() => {
@@ -98,5 +100,37 @@ describe('Reference Font Workflow Isolation', () => {
     expect(activeGlyph.isEdited).toBe(true);
     expect(activeGlyph.paths).toHaveLength(1);
     expect(activeGlyph.paths[0].id).toBe('user-stroke-1');
+  });
+
+  it('rejects imported fonts that contain zero Kannada glyphs with a clear error', async () => {
+    const latinFont = new opentype.Font({
+      familyName: 'LatinOnlyFont',
+      styleName: 'Regular',
+      unitsPerEm: 1000,
+      ascender: 800,
+      descender: -200,
+      glyphs: [
+        new opentype.Glyph({
+          name: '.notdef',
+          unicode: 0,
+          advanceWidth: 500,
+          path: new opentype.Path(),
+        }),
+        new opentype.Glyph({
+          name: 'A',
+          unicode: 65,
+          advanceWidth: 600,
+          path: new opentype.Path(),
+        }),
+      ],
+    });
+
+    const buffer = latinFont.toArrayBuffer();
+    const file = new File([buffer], 'LatinOnlyFont.ttf', { type: 'font/ttf' });
+
+    const result = await parseUserFontFile(file);
+    expect(result.success).toBe(false);
+    expect(result.extractedGlyphsCount).toBe(0);
+    expect(result.error).toContain('0 Kannada Unicode glyphs');
   });
 });

@@ -117,8 +117,13 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
         isSpacePressedRef.current = true;
         setIsSpaceHeld(true);
         const canvas = fabricCanvasRef.current;
-        if (canvas?.upperCanvasEl) {
-          canvas.upperCanvasEl.style.cursor = 'grab';
+        if (canvas) {
+          // Disable drawing mode and marquee selection immediately so space-drag cannot draw or select
+          canvas.isDrawingMode = false;
+          canvas.selection = false;
+          if (canvas.upperCanvasEl) {
+            canvas.upperCanvasEl.style.cursor = 'grab';
+          }
         }
       }
     };
@@ -132,15 +137,18 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
       if (e.code === 'Space') {
         isSpacePressedRef.current = false;
         setIsSpaceHeld(false);
-        if (!isPanningRef.current) {
-          const canvas = fabricCanvasRef.current;
-          if (canvas?.upperCanvasEl) {
+        const canvas = fabricCanvasRef.current;
+        if (canvas) {
+          const currentTool = useUIStore.getState().activeTool;
+          canvas.isDrawingMode = currentTool === 'brush';
+          canvas.selection = currentTool === 'select';
+          if (!isPanningRef.current && canvas.upperCanvasEl) {
             canvas.upperCanvasEl.style.cursor =
-              activeTool === 'brush' || activeTool === 'eraser'
+              currentTool === 'brush' || currentTool === 'eraser'
                 ? 'none'
-                : activeTool === 'pan'
+                : currentTool === 'pan'
                 ? 'grab'
-                : activeTool === 'pen'
+                : currentTool === 'pen'
                 ? 'crosshair'
                 : 'default';
           }
@@ -210,6 +218,7 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
 
   return {
     isSpaceHeld,
+    isSpacePressedRef,
     isPanning,
     startPan,
     handleResizeMouseDown,

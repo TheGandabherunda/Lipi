@@ -28,6 +28,17 @@ export async function parseUserFontFile(file: File): Promise<ImportedFontResult>
     const { metrics, outlines } = extractOutlinesFromFont(font);
     const count = Object.keys(outlines).length;
 
+    if (count === 0) {
+      return {
+        success: false,
+        fontName: familyName,
+        metrics,
+        outlines: {},
+        extractedGlyphsCount: 0,
+        error: `Font "${familyName}" was loaded, but contains 0 Kannada Unicode glyphs (U+0C80–U+0CFF). A font containing Kannada script is required for reference outlines.`,
+      };
+    }
+
     return {
       success: true,
       fontName: familyName,

@@ -29,5 +29,6 @@ export interface LipiFileSchema {
   metadata: LipiProjectMetadata;
   glyphs: Record<string, GlyphData>; // Keyed by Unicode string e.g. "U+0C95"
   weightProfiles?: Record<number, Record<string, GlyphData>>;
+  glyphHistories?: Record<string, { stack: import('./glyph').VectorPathData[][]; index: number }>;
   customProperties?: Record<string, any>; // Preserves unsupported or user-defined fields safely
 }

@@ -74,13 +74,10 @@ export const TopNavigation: React.FC<TopNavigationProps> = ({ onOpenPreview }) =
       }
 
       setSelectedGoogleFont('custom');
-      updateMetadata({
-        name: result.fontName,
-        metrics: result.metrics,
-      });
+      // Set reference outlines strictly without overwriting user project name or metrics
       setActiveOutlines(result.outlines);
       alert(
-        `Successfully imported "${result.fontName}" with ${result.extractedGlyphsCount} Kannada characters! Guidelines updated.`
+        `Successfully loaded "${result.fontName}" reference font with ${result.extractedGlyphsCount} Kannada characters.`
       );
     } catch (err) {
       alert(`Failed to import font: ${err instanceof Error ? err.message : 'Unknown error'}`);

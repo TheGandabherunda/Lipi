@@ -10,9 +10,14 @@ export interface GuideMetrics {
   mahapranaY: number;
   descenderY: number;
   centerX: number;
-  leftMarginX: number;
-  rightAdvanceX: number;
+  leftMarginX: number; // Glyph Origin X (font X = 0)
+  originX: number;     // Semantic alias for leftMarginX
+  rightAdvanceX: number; // Advance Width boundary X (font X = advanceWidth)
+  advanceX: number;      // Semantic alias for rightAdvanceX
+  lsbX: number;          // Left Side Bearing Line X (font X = leftSideBearingUnits)
+  rsbX: number;          // Right Side Bearing Line X (font X = advanceWidth - rightSideBearingUnits)
   scale: number;
+  unitScale: number;
   unitsPerEm: number;
   ascenderUnits: number;
   capHeightUnits: number;
@@ -62,16 +67,24 @@ export function calculateGuidelinePositions(
 
   const totalContentHeight = totalSpanUnits * unitScale;
   const topPadding = Math.round((canvasHeight - totalContentHeight) / 2);
-  const ascenderY = topPadding;
-  const capHeightY = Math.round(topPadding + (ascenderUnits - capHeightUnits) * unitScale);
+
+  // Unified vertical coordinate mapping: all guide Y coordinates follow the exact same transform
   const baselineY = Math.round(topPadding + (ascenderUnits - baselineUnits) * unitScale);
-  const mahapranaY = Math.round(baselineY - mahapranaUnits * unitScale);
-  const descenderY = Math.round(topPadding + totalSpanUnits * unitScale);
+  const fontYToCanvasY = (fontY: number) => Math.round(baselineY - (fontY - baselineUnits) * unitScale);
+
+  const ascenderY = fontYToCanvasY(ascenderUnits);
+  const capHeightY = fontYToCanvasY(capHeightUnits);
+  const mahapranaY = fontYToCanvasY(mahapranaUnits);
+  const descenderY = fontYToCanvasY(descenderUnits);
 
   const usableAdvanceWidth = glyphAdvance * unitScale;
   const centerX = Math.round(canvasWidth / 2);
-  const leftMarginX = Math.round(centerX - usableAdvanceWidth / 2);
-  const rightAdvanceX = Math.round(leftMarginX + usableAdvanceWidth);
+  const leftMarginX = Math.round(centerX - usableAdvanceWidth / 2); // Origin (0)
+  const rightAdvanceX = Math.round(leftMarginX + usableAdvanceWidth); // Advance boundary
+
+  // Actual sidebearing guide positions
+  const lsbX = Math.round(leftMarginX + leftSideBearingUnits * unitScale);
+  const rsbX = Math.round(rightAdvanceX - rightSideBearingUnits * unitScale);
 
   return {
     ascenderY,
@@ -81,8 +94,13 @@ export function calculateGuidelinePositions(
     descenderY,
     centerX,
     leftMarginX,
+    originX: leftMarginX,
     rightAdvanceX,
+    advanceX: rightAdvanceX,
+    lsbX,
+    rsbX,
     scale: unitScale,
+    unitScale,
     unitsPerEm: upm,
     ascenderUnits,
     capHeightUnits,
@@ -380,30 +398,61 @@ export function renderCanvasGuidelines(
     ctx.fillText('Center (ಕೇಂದ್ರ)', guides.centerX + 6, 30);
   }
 
-  // Left & Right Sidebearings (LSB / RSB) and Advance Width
+  // Left & Right Boundaries (Origin, LSB, RSB, Advance Width)
   if (config.showAdvanceWidth) {
-    ctx.strokeStyle = 'rgba(79, 70, 229, 0.55)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([2, 4]);
+    const advanceSpan = Math.round((guides.rightAdvanceX - guides.leftMarginX) / guides.scale);
 
+    // 1. Origin Boundary (X = 0)
+    ctx.strokeStyle = 'rgba(79, 70, 229, 0.7)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
     ctx.beginPath();
     ctx.moveTo(guides.leftMarginX, 24);
     ctx.lineTo(guides.leftMarginX, height - 24);
     ctx.stroke();
 
+    // 2. Advance Boundary (X = advanceWidth)
     ctx.beginPath();
     ctx.moveTo(guides.rightAdvanceX, 24);
     ctx.lineTo(guides.rightAdvanceX, height - 24);
     ctx.stroke();
 
+    // 3. Sidebearing Guides (LSB and RSB ink margins)
+    ctx.strokeStyle = 'rgba(14, 165, 233, 0.65)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 3]);
+
+    if (guides.leftSideBearingUnits > 0) {
+      ctx.beginPath();
+      ctx.moveTo(guides.lsbX, 28);
+      ctx.lineTo(guides.lsbX, height - 28);
+      ctx.stroke();
+    }
+
+    if (guides.rightSideBearingUnits > 0) {
+      ctx.beginPath();
+      ctx.moveTo(guides.rsbX, 28);
+      ctx.lineTo(guides.rsbX, height - 28);
+      ctx.stroke();
+    }
+
     ctx.setLineDash([]);
     ctx.font = '10px Inter, sans-serif';
-    ctx.fillStyle = 'rgba(79, 70, 229, 0.95)';
-    ctx.fillText('LSB (0)', guides.leftMarginX + 4, height - 32);
-    ctx.fillText('RSB', guides.rightAdvanceX - 28, height - 32);
 
-    const advanceSpan = Math.round((guides.rightAdvanceX - guides.leftMarginX) / guides.scale);
-    ctx.font = '10px Inter, sans-serif';
+    // Labels for Origin and Advance
+    ctx.fillStyle = 'rgba(79, 70, 229, 0.95)';
+    ctx.fillText('Origin (0)', guides.leftMarginX + 4, height - 32);
+    ctx.fillText(`Advance (${advanceSpan})`, guides.rightAdvanceX - 70, height - 32);
+
+    // Labels for LSB and RSB
+    ctx.fillStyle = 'rgba(2, 132, 199, 0.95)';
+    if (guides.leftSideBearingUnits > 0) {
+      ctx.fillText(`LSB (+${guides.leftSideBearingUnits})`, guides.lsbX + 4, height - 46);
+    }
+    if (guides.rightSideBearingUnits > 0) {
+      ctx.fillText(`RSB (-${guides.rightSideBearingUnits})`, guides.rsbX - 58, height - 46);
+    }
+
     const dimText = `⟵  Advance Width: ${advanceSpan} units  ⟶`;
     const dimWidth = ctx.measureText(dimText).width;
     ctx.fillStyle = 'rgba(79, 70, 229, 0.85)';

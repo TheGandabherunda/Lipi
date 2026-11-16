@@ -173,4 +173,104 @@ describe('Glyph State System & Per-Glyph History', () => {
     expect(result3.success).toBe(false);
     expect(result3.error).toContain('Missing glyphs');
   });
+
+  it('sanitizes and repairs malformed metrics with NaN, strings, and inverted bounds', () => {
+    const malformedJson = JSON.stringify({
+      format: 'LIPI_PROJECT',
+      schemaVersion: '1.1.0',
+      metadata: {
+        name: 'BrokenMetricsFont',
+        metrics: {
+          unitsPerEm: -500, // Invalid negative UPM
+          ascender: 'not-a-number', // NaN
+          descender: 1200, // Inverted: descender > ascender
+          baseline: '0',
+        },
+      },
+      glyphs: {
+        'U+0C85': {
+          unicode: 'U+0C85',
+          character: 'ಅ',
+          paths: [],
+        },
+      },
+    });
+
+    const res = useGlyphStore.getState().loadLipiFileContent(malformedJson);
+    expect(res.success).toBe(true);
+
+    const metrics = useGlyphStore.getState().metadata.metrics;
+    // UnitsPerEm repaired to minimum bound (16)
+    expect(metrics.unitsPerEm).toBe(16);
+    // Ascender repaired from NaN to default (790)
+    expect(metrics.ascender).toBe(DEFAULT_METRICS.ascender);
+    // Ascender > descender invariant strictly restored
+    expect(metrics.ascender).toBeGreaterThan(metrics.descender);
+  });
+
+  it('persists and restores multi-step undo history for glyphs in .lipi files', () => {
+    useGlyphStore.getState().setActiveUnicode('U+0C85');
+
+    const p1: VectorPathData = { id: 'p1', pathString: 'M 10 10 L 20 20', strokeWidth: 16, strokeColor: '#000' };
+    const p2: VectorPathData = { id: 'p2', pathString: 'M 30 30 L 40 40', strokeWidth: 16, strokeColor: '#000' };
+
+    useGlyphStore.getState().updateActiveGlyphPaths([p1]);
+    useGlyphStore.getState().updateActiveGlyphPaths([p1, p2]);
+
+    expect(useGlyphStore.getState().canUndo('U+0C85')).toBe(true);
+    expect(useGlyphStore.getState().glyphHistories['U+0C85'].stack.length).toBe(3);
+
+    const serialized = useGlyphStore.getState().serializeLipiProject();
+    expect(serialized).toContain('glyphHistories');
+
+    // Reset store
+    useGlyphStore.getState().resetProject('Clean');
+    expect(useGlyphStore.getState().canUndo('U+0C85')).toBe(false);
+
+    // Restore from serialized JSON
+    const res = useGlyphStore.getState().loadLipiFileContent(serialized);
+    expect(res.success).toBe(true);
+
+    // Verify undo history is fully restored!
+    expect(useGlyphStore.getState().canUndo('U+0C85')).toBe(true);
+    useGlyphStore.getState().undo();
+    expect(useGlyphStore.getState().glyphs['U+0C85'].paths.length).toBe(1);
+    expect(useGlyphStore.getState().canUndo('U+0C85')).toBe(true);
+    useGlyphStore.getState().undo();
+    expect(useGlyphStore.getState().glyphs['U+0C85'].paths.length).toBe(0);
+    expect(useGlyphStore.getState().canUndo('U+0C85')).toBe(false);
+  });
+
+  it('preserves undo histories across weight profile switching without wiping', () => {
+    // 1. Draw in Regular (400)
+    useGlyphStore.getState().setActiveUnicode('U+0C85');
+    const strokeReg: VectorPathData = { id: 'r1', pathString: 'M 0 0 L 10 10', strokeWidth: 16, strokeColor: '#000' };
+    useGlyphStore.getState().updateActiveGlyphPaths([strokeReg]);
+    expect(useGlyphStore.getState().canUndo('U+0C85')).toBe(true);
+
+    // 2. Switch to Bold (700) and draw
+    useGlyphStore.getState().updateMetadata({ weightClass: 700 });
+    expect(useGlyphStore.getState().glyphs['U+0C85'].paths.length).toBe(0);
+
+    const strokeBold: VectorPathData = { id: 'b1', pathString: 'M 50 50 L 60 60', strokeWidth: 32, strokeColor: '#000' };
+    useGlyphStore.getState().updateActiveGlyphPaths([strokeBold]);
+    expect(useGlyphStore.getState().canUndo('U+0C85')).toBe(true);
+
+    // 3. Switch back to Regular (400)
+    useGlyphStore.getState().updateMetadata({ weightClass: 400 });
+    // Regular stroke is intact
+    expect(useGlyphStore.getState().glyphs['U+0C85'].paths.length).toBe(1);
+    // Regular undo history is intact!
+    expect(useGlyphStore.getState().canUndo('U+0C85')).toBe(true);
+    useGlyphStore.getState().undo();
+    expect(useGlyphStore.getState().glyphs['U+0C85'].paths.length).toBe(0);
+
+    // 4. Switch back to Bold (700)
+    useGlyphStore.getState().updateMetadata({ weightClass: 700 });
+    expect(useGlyphStore.getState().glyphs['U+0C85'].paths.length).toBe(1);
+    // Bold undo history is intact!
+    expect(useGlyphStore.getState().canUndo('U+0C85')).toBe(true);
+    useGlyphStore.getState().undo();
+    expect(useGlyphStore.getState().glyphs['U+0C85'].paths.length).toBe(0);
+  });
 });

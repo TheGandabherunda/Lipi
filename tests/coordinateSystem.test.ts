@@ -100,4 +100,74 @@ describe('Coordinate System Math', () => {
       }
     }
   });
+
+  it('correctly handles nonzero baseline metrics across all vertical guides', () => {
+    const nonZeroBaselineMetrics: FontMetrics = {
+      unitsPerEm: 1000,
+      ascender: 850,
+      baseline: 150,
+      descender: -250,
+      capHeight: 650,
+      mahaprana: -120,
+      leftSideBearing: 60,
+      rightSideBearing: 70,
+    };
+
+    const nzGuides = calculateGuidelinePositions(
+      800,
+      800,
+      nonZeroBaselineMetrics,
+      780
+    );
+
+    // 1. Baseline canvas Y maps back to font y = 150
+    const baselineFontPt = canvasToFontPoint(100, nzGuides.baselineY, nzGuides);
+    expect(Math.abs(baselineFontPt.y - 150)).toBeLessThanOrEqual(1.5);
+
+    // 2. Ascender canvas Y maps back to font y = 850
+    const ascenderFontPt = canvasToFontPoint(100, nzGuides.ascenderY, nzGuides);
+    expect(Math.abs(ascenderFontPt.y - 850)).toBeLessThanOrEqual(1.5);
+
+    // 3. Descender canvas Y maps back to font y = -250
+    const descenderFontPt = canvasToFontPoint(100, nzGuides.descenderY, nzGuides);
+    expect(Math.abs(descenderFontPt.y - (-250))).toBeLessThanOrEqual(1.5);
+
+    // 4. Font Y = 0 maps to exactly baseline - (0 - 150) * unitScale = baseline + 150 * unitScale
+    const zeroFontCanvasPt = fontToCanvasPoint(0, 0, nzGuides);
+    expect(Math.round(zeroFontCanvasPt.y)).toBe(
+      Math.round(nzGuides.baselineY + 150 * nzGuides.unitScale)
+    );
+  });
+
+  it('calculates distinct origin, advance, LSB, and RSB guideline positions with honest labels', () => {
+    const metrics: FontMetrics = {
+      unitsPerEm: 1000,
+      ascender: 800,
+      baseline: 0,
+      descender: -200,
+      capHeight: 600,
+      leftSideBearing: 75,
+      rightSideBearing: 85,
+    };
+    const advWidth = 800;
+
+    const g = calculateGuidelinePositions(800, 800, metrics, advWidth);
+
+    // Origin is at leftMarginX (x = 0 in font units)
+    expect(g.originX).toBe(g.leftMarginX);
+
+    // Advance boundary is at leftMarginX + advanceWidth * unitScale (x = 800 in font units)
+    expect(g.advanceX).toBe(g.leftMarginX + Math.round(advWidth * g.unitScale));
+
+    // LSB line is at x = leftSideBearing
+    expect(g.lsbX).toBe(g.leftMarginX + Math.round(75 * g.unitScale));
+
+    // RSB line is at x = advanceWidth - rightSideBearing
+    expect(g.rsbX).toBe(g.leftMarginX + Math.round((advWidth - 85) * g.unitScale));
+
+    // LSB is to the right of Origin
+    expect(g.lsbX).toBeGreaterThan(g.originX);
+    // RSB is to the left of Advance
+    expect(g.rsbX).toBeLessThan(g.advanceX);
+  });
 });

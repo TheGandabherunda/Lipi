@@ -25,7 +25,8 @@ import { clsx } from 'clsx';
 
 export const ExportModal: React.FC = () => {
   const [isExporting, setIsExporting] = useState<string | null>(null);
-  const [mapLatinKeys, setMapLatinKeys] = useState<boolean>(true);
+  const [mapLatinKeys, setMapLatinKeys] = useState<boolean>(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const [testText, setTestText] = useState<string>('ಅಮ್ಮ');
   const [showWindowsGuide, setShowWindowsGuide] = useState<boolean>(true);
   const [downloadSuccessToast, setDownloadSuccessToast] = useState<string | null>(null);
@@ -50,6 +51,7 @@ export const ExportModal: React.FC = () => {
 
   const handleDownloadFont = async (format: 'ttf' | 'otf' | 'woff' | 'zip') => {
     try {
+      setValidationError(null);
       setIsExporting(format);
       const canvasWidth = useUIStore.getState().canvasWidth || 800;
       const canvasHeight = useUIStore.getState().canvasHeight || 800;
@@ -63,11 +65,11 @@ export const ExportModal: React.FC = () => {
         { canvasWidth, canvasHeight, mapLatinKeys }
       );
       setDownloadSuccessToast(
-        format === 'zip' ? 'Complete font package (.zip)' : `Font binary (.${format.toUpperCase()})`
+        format === 'zip' ? 'Complete font package (.zip)' : `OpenType font binary (.OTF)`
       );
       setTimeout(() => setDownloadSuccessToast(null), 4000);
     } catch (err) {
-      alert(`Export failed: ${err instanceof Error ? err.message : 'Unknown compilation error'}`);
+      setValidationError(err instanceof Error ? err.message : 'Unknown compilation error');
     } finally {
       setIsExporting(null);
     }
@@ -145,6 +147,17 @@ export const ExportModal: React.FC = () => {
 
         {/* 2. Scrollable Body */}
         <div className="p-6 flex flex-col gap-5 overflow-y-auto flex-1">
+          {/* Validation Error Banner */}
+          {validationError && (
+            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-2.5 text-xs text-rose-800 font-medium">
+              <X
+                className="w-4 h-4 text-rose-600 shrink-0 mt-0.5 cursor-pointer hover:text-rose-900"
+                onClick={() => setValidationError(null)}
+              />
+              <div className="flex-1 whitespace-pre-wrap leading-relaxed font-sans">{validationError}</div>
+            </div>
+          )}
+
           {/* Toast Notification */}
           {downloadSuccessToast && (
             <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-2.5 text-xs text-emerald-800 font-medium animate-in slide-in-from-top-2 duration-200">
@@ -209,7 +222,7 @@ export const ExportModal: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <Info className="w-4 h-4 text-amber-600 shrink-0" />
                   <span className="text-xs font-bold text-amber-900">
-                    Where is my letter when opening the .TTF in Windows?
+                    How to view custom letters in font previewers
                   </span>
                 </div>
                 <button
@@ -224,16 +237,16 @@ export const ExportModal: React.FC = () => {
               </div>
 
               {showWindowsGuide && (
-                <div className="text-xs text-amber-900/90 leading-relaxed border-t border-amber-200/60 pt-2 flex flex-col gap-1.5">
+                <div className="text-xs text-amber-900/90 leading-relaxed border-t border-amber-200/60 pt-2 flex flex-col gap-1.5 font-sans">
                   <p>
-                    <strong>Why Windows Font Viewer looks English:</strong> The default Windows Font Viewer (<code>fontview.exe</code>) is hardcoded to render the English sentence <em>"The quick brown fox jumps over the lazy dog"</em>. Because it only queries Latin ASCII letters, it does not display Kannada letters by default.
+                    Standard OS font viewers (like Windows Font Viewer) default to an English sentence (<em>"The quick brown fox jumps over the lazy dog"</em>). Because they query Latin ASCII keys, Indic glyphs do not appear unless mapped or typed directly.
                   </p>
                   <p>
-                    <strong>Your drawn letter IS 100% inside the font:</strong> It is stored at Unicode <code>U+0C85</code> (Kannada Letter 'ಅ').
+                    <strong>Your drawn letter IS 100% inside the font:</strong> It is stored at its official Kannada Unicode codepoint (e.g. <code>U+0C85</code> for 'ಅ').
                   </p>
                   <p className="flex items-center gap-1.5 text-amber-950 font-medium">
                     <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                    <strong>Instant Solution:</strong> Keep <em>"Direct English Keyboard Mapping"</em> enabled below! This maps your 'ಅ' to both Unicode U+0C85 AND the English 'a' key. When you open the TTF in Windows, the letter 'a' in <em>"lazy"</em> and <em>"abcdef..."</em> will immediately show your custom 'ಅ'!
+                    <strong>Tip:</strong> Open the included <code>type_test.html</code> inside the ZIP package to test your font with full Kannada typing and waterfall scaling! Or enable <em>English Key Aliasing</em> below for direct Latin key preview.
                   </p>
                 </div>
               )}
@@ -247,32 +260,7 @@ export const ExportModal: React.FC = () => {
               Keyboard & Encoding Mode
             </label>
             <div className="grid grid-cols-2 gap-3">
-              {/* Option 1: Direct English Keyboard Mode (Recommended) */}
-              <button
-                type="button"
-                onClick={() => setMapLatinKeys(true)}
-                className={clsx(
-                  'p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2',
-                  mapLatinKeys
-                    ? 'border-indigo-600 bg-indigo-50/60 shadow-xs ring-1 ring-indigo-500'
-                    : 'border-slate-200 hover:border-slate-300 bg-white'
-                )}
-              >
-                <div className="flex items-center justify-between w-full">
-                  <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                    Direct English Keys (Dual)
-                    <span className="text-[9px] font-bold uppercase bg-indigo-600 text-white px-1.5 py-0.2 rounded-full">
-                      Recommended
-                    </span>
-                  </span>
-                  {mapLatinKeys && <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />}
-                </div>
-                <p className="text-[11px] text-slate-500 leading-snug">
-                  Maps <strong>'a'</strong> &rarr; <strong>'ಅ'</strong>, <strong>'k'</strong> &rarr; <strong>'ಕ'</strong>. Instantly visible in Windows Font Viewer and types on any English keyboard without installing an IME.
-                </p>
-              </button>
-
-              {/* Option 2: Canonical Indic Unicode Mode */}
+              {/* Option 1: Canonical Indic Unicode Mode (Default & Recommended) */}
               <button
                 type="button"
                 onClick={() => setMapLatinKeys(false)}
@@ -284,13 +272,41 @@ export const ExportModal: React.FC = () => {
                 )}
               >
                 <div className="flex items-center justify-between w-full">
-                  <span className="text-xs font-bold text-slate-900">
-                    Strict Unicode 15.0
+                  <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                    Canonical Unicode
+                    <span className="text-[9px] font-bold uppercase bg-indigo-600 text-white px-1.5 py-0.2 rounded-full">
+                      Recommended
+                    </span>
                   </span>
                   {!mapLatinKeys && <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />}
                 </div>
                 <p className="text-[11px] text-slate-500 leading-snug">
-                  Strictly maps to official Indic Unicode points (<code>U+0C80</code>&ndash;<code>U+0CFF</code>). Ideal for formal publishing with Windows Indic or Nudi keyboards.
+                  Strictly maps to official Indic Unicode points (<code>U+0C80</code>&ndash;<code>U+0CFF</code>). Leaves standard Latin English characters unaffected; ideal for typing with Kannada IMEs (Nudi, InScript, Google Indic).
+                </p>
+              </button>
+
+              {/* Option 2: Direct English Keyboard Mode (Opt-in preview) */}
+              <button
+                type="button"
+                onClick={() => setMapLatinKeys(true)}
+                className={clsx(
+                  'p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2',
+                  mapLatinKeys
+                    ? 'border-amber-600 bg-amber-50/60 shadow-xs ring-1 ring-amber-500'
+                    : 'border-slate-200 hover:border-slate-300 bg-white'
+                )}
+              >
+                <div className="flex items-center justify-between w-full">
+                  <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                    English Key Aliasing
+                    <span className="text-[9px] font-bold uppercase bg-amber-600 text-white px-1.5 py-0.2 rounded-full">
+                      Experimental
+                    </span>
+                  </span>
+                  {mapLatinKeys && <CheckCircle2 className="w-4 h-4 text-amber-600 shrink-0" />}
+                </div>
+                <p className="text-[11px] text-slate-500 leading-snug">
+                  Maps <strong>'a'</strong> &rarr; <strong>'ಅ'</strong>, <strong>'k'</strong> &rarr; <strong>'ಕ'</strong> for unconfigured English keyboards. <em>Note: alters how ordinary Latin English words render.</em>
                 </p>
               </button>
             </div>
@@ -347,7 +363,7 @@ export const ExportModal: React.FC = () => {
                   </span>
                 </span>
                 <span className="text-xs text-slate-500 mt-0.5">
-                  Includes <strong>.TTF</strong>, <strong>.OTF</strong>, <strong>.WOFF</strong>, interactive browser typewriter (<strong>type_test.html</strong>), & installation manual.
+                  Includes compiled <strong>.OTF</strong> OpenType binary, interactive browser typewriter (<strong>type_test.html</strong>), & installation manual.
                 </span>
               </div>
             </div>
@@ -366,98 +382,36 @@ export const ExportModal: React.FC = () => {
             </button>
           </div>
 
-          {/* Section E: Individual Font Binaries */}
+          {/* Section E: Individual Font Binary */}
           <div className="flex flex-col gap-2">
             <span className="text-xs font-bold text-slate-700">
-              Individual Font Binaries
+              Individual Font Binary
             </span>
-            <div className="grid grid-cols-3 gap-3">
-              {/* TTF */}
-              <div className="p-3.5 rounded-2xl border border-slate-200 bg-white hover:border-indigo-300 hover:shadow-xs transition-all flex flex-col justify-between gap-2.5">
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600">
-                    <FileCheck className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <span className="text-xs font-bold text-slate-800 block">TrueType (.ttf)</span>
-                    <span className="text-[10px] text-slate-400">Desktop & Windows</span>
-                  </div>
+            <div className="p-3.5 rounded-2xl border border-slate-200 bg-white hover:border-indigo-300 hover:shadow-xs transition-all flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 shrink-0">
+                  <FileCheck className="w-4 h-4" />
                 </div>
-                <span className="text-[11px] text-slate-500 leading-snug">
-                  Standard installable font for Windows, Mac, Word, & Figma.
-                </span>
-                <button
-                  type="button"
-                  onClick={() => handleDownloadFont('ttf')}
-                  disabled={isExporting !== null}
-                  className="w-full py-1.5 bg-slate-50 hover:bg-indigo-600 hover:text-white border border-slate-200 hover:border-indigo-600 text-slate-700 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  {isExporting === 'ttf' ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Download className="w-3 h-3" />
-                  )}
-                  <span>Export .TTF</span>
-                </button>
-              </div>
-
-              {/* OTF */}
-              <div className="p-3.5 rounded-2xl border border-slate-200 bg-white hover:border-purple-300 hover:shadow-xs transition-all flex flex-col justify-between gap-2.5">
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-purple-50 flex items-center justify-center text-purple-600">
-                    <FileCheck className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <span className="text-xs font-bold text-slate-800 block">OpenType (.otf)</span>
-                    <span className="text-[10px] text-slate-400">Print & Publishing</span>
-                  </div>
+                <div>
+                  <span className="text-xs font-bold text-slate-800 block">OpenType Font (.otf)</span>
+                  <span className="text-[11px] text-slate-500">
+                    Standard installable OpenType binary with PostScript CFF outlines. Universally supported across Windows, macOS, Linux, iOS, Android, Figma, Adobe apps, and web @font-face.
+                  </span>
                 </div>
-                <span className="text-[11px] text-slate-500 leading-snug">
-                  High-precision Bezier curves for Photoshop & InDesign.
-                </span>
-                <button
-                  type="button"
-                  onClick={() => handleDownloadFont('otf')}
-                  disabled={isExporting !== null}
-                  className="w-full py-1.5 bg-slate-50 hover:bg-purple-600 hover:text-white border border-slate-200 hover:border-purple-600 text-slate-700 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  {isExporting === 'otf' ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Download className="w-3 h-3" />
-                  )}
-                  <span>Export .OTF</span>
-                </button>
               </div>
-
-              {/* WOFF */}
-              <div className="p-3.5 rounded-2xl border border-slate-200 bg-white hover:border-emerald-300 hover:shadow-xs transition-all flex flex-col justify-between gap-2.5">
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-emerald-50 flex items-center justify-center text-emerald-600">
-                    <FileCheck className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <span className="text-xs font-bold text-slate-800 block">WebFont (.woff)</span>
-                    <span className="text-[10px] text-slate-400">Web & CSS</span>
-                  </div>
-                </div>
-                <span className="text-[11px] text-slate-500 leading-snug">
-                  Compressed format for website @font-face embeds.
-                </span>
-                <button
-                  type="button"
-                  onClick={() => handleDownloadFont('woff')}
-                  disabled={isExporting !== null}
-                  className="w-full py-1.5 bg-slate-50 hover:bg-emerald-600 hover:text-white border border-slate-200 hover:border-emerald-600 text-slate-700 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  {isExporting === 'woff' ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Download className="w-3 h-3" />
-                  )}
-                  <span>Export .WOFF</span>
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => handleDownloadFont('otf')}
+                disabled={isExporting !== null}
+                className="px-4 py-2 bg-slate-50 hover:bg-indigo-600 hover:text-white border border-slate-200 hover:border-indigo-600 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer shrink-0"
+              >
+                {isExporting === 'otf' ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Download className="w-3.5 h-3.5" />
+                )}
+                <span>Export .OTF</span>
+              </button>
             </div>
           </div>
 
