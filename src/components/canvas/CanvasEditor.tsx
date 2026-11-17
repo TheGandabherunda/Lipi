@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useCallback, useMemo, useState } from 'react';
-import { Canvas, PencilBrush, Path, ActiveSelection, type FabricObject } from 'fabric';
+import { Canvas, PencilBrush, Path, ActiveSelection } from 'fabric';
 import { useGlyphStore, registerCanvasFlusher } from '../../store/glyphStore';
 import { useUIStore } from '../../store/uiStore';
 import { calculateGuidelinePositions, renderCanvasGuidelines } from './CanvasGuidelines';
@@ -43,6 +43,9 @@ import {
   serializeCanvasPaths,
   rehydrateFabricPath,
 } from './utils/canvasSerialization';
+import { finalizeBrushStroke, hasActiveBrushStroke } from './utils/fabricBrushAdapter';
+import { applyCanvasInteractionMode } from './utils/canvasInteractionMode';
+import { flushEditorCanvasToGlyph } from './utils/canvasFlusher';
 import { isTypingInInputElement } from '../../utils/keyboardUtils';
 
 export const CanvasEditor: React.FC = React.memo(() => {
@@ -602,63 +605,25 @@ export const CanvasEditor: React.FC = React.memo(() => {
   // Synchronously flushes the current canvas artwork (including open pen paths, brush strokes, transforms) into a specific glyph's state & history
   const flushCanvasToGlyph = useCallback(
     (targetUnicode: string) => {
-      const canvas = fabricCanvasRef.current;
-      if (!canvas) return;
-
-      isFlushInProgressRef.current = true;
-
-      try {
-        // 1. Commit in-progress pen path (even 1 anchor point) to canvas WITHOUT calling syncCanvasToStore
-        if (penNodesRef.current.length >= 1) {
-          commitPenPath(false, false);
-        } else {
-          penNodesRef.current = [];
-        }
-
-        // 2. Finalize in-progress brush stroke if user was mid-stroke
-        if (canvas.isDrawingMode && canvas.freeDrawingBrush) {
-          const brush = canvas.freeDrawingBrush as any;
-          if (brush._points && brush._points.length > 1) {
-            try {
-              brush._finalizeAndAddPath?.();
-            } catch (e) {
-              console.warn('Failed to finalize brush stroke before flush:', e);
-            }
-          }
-          brush._reset?.();
-          canvas.clearContext?.(canvas.contextTop);
-        }
-
-        // 3. Clear active drag references
-        activeDragIndexRef.current = null;
-        penDragStartPosRef.current = null;
-        lastEraserPosRef.current = null;
-        hasErasedDuringDragRef.current = false;
-        activeNodeDragRef.current = null;
-        marqueeBoxRef.current = null;
-        hoveredNodeInfoRef.current = null;
-        hoveredSegmentRef.current = null;
-        isMouseDownRef.current = false;
-
-        // 4. Discard selection so any active transforms/drags are committed
-        canvas.discardActiveObject();
-        clearNodeEditing();
-
-        // 5. Clear any pending debounce timer
-        if (debounceTimerRef.current) {
-          clearTimeout(debounceTimerRef.current);
-          debounceTimerRef.current = null;
-        }
-
-        // 6. Serialize all objects currently on canvas
-        const pendingPaths = serializeCanvasPaths(canvas);
-
-        // 7. Update targetUnicode directly in glyphStore with an independent history frame
-        useGlyphStore.getState().updateGlyphPaths(targetUnicode, pendingPaths, true);
-        lastFlushedUnicodeRef.current = targetUnicode;
-      } finally {
-        isFlushInProgressRef.current = false;
-      }
+      flushEditorCanvasToGlyph({
+        targetUnicode,
+        canvas: fabricCanvasRef.current,
+        penNodesRef,
+        isFlushInProgressRef,
+        lastFlushedUnicodeRef,
+        commitPenPath,
+        clearNodeEditing,
+        debounceTimerRef,
+        activeDragIndexRef,
+        penDragStartPosRef,
+        lastEraserPosRef,
+        hasErasedDuringDragRef,
+        activeNodeDragRef,
+        marqueeBoxRef,
+        hoveredNodeInfoRef,
+        hoveredSegmentRef,
+        isMouseDownRef,
+      });
     },
     [commitPenPath, clearNodeEditing]
   );
@@ -1494,17 +1459,11 @@ export const CanvasEditor: React.FC = React.memo(() => {
       const tool = useUIStore.getState().activeTool;
       const curPenMode = useUIStore.getState().penMode;
 
-      if (tool === 'brush' && canvas.isDrawingMode && canvas.freeDrawingBrush) {
-        const brush = canvas.freeDrawingBrush as any;
-        if (brush._points && brush._points.length > 1) {
-          try {
-            brush._finalizeAndAddPath?.();
-          } catch (e) {
-            console.warn('Failed to finalize brush on global pointerup:', e);
-          }
+      if (tool === 'brush' && canvas && hasActiveBrushStroke(canvas)) {
+        const res = finalizeBrushStroke(canvas);
+        if (res.error) {
+          console.warn('Failed to finalize brush on global pointerup:', res.error);
         }
-        brush._reset?.();
-        canvas.clearContext?.(canvas.contextTop);
       }
 
       if (tool === 'direct-select') {
@@ -1544,7 +1503,6 @@ export const CanvasEditor: React.FC = React.memo(() => {
 
     window.addEventListener('pointerup', handleGlobalWindowPointerUp);
     window.addEventListener('pointercancel', handleGlobalWindowPointerUp);
-    window.addEventListener('mouseup', handleGlobalWindowPointerUp);
     window.addEventListener('blur', handleGlobalWindowPointerUp);
 
     fabricCanvasRef.current = canvas;
@@ -1552,7 +1510,6 @@ export const CanvasEditor: React.FC = React.memo(() => {
     return () => {
       window.removeEventListener('pointerup', handleGlobalWindowPointerUp);
       window.removeEventListener('pointercancel', handleGlobalWindowPointerUp);
-      window.removeEventListener('mouseup', handleGlobalWindowPointerUp);
       window.removeEventListener('blur', handleGlobalWindowPointerUp);
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
       if (upperEl) upperEl.removeEventListener('contextmenu', handleCanvasContextMenu);
@@ -1577,10 +1534,20 @@ export const CanvasEditor: React.FC = React.memo(() => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
 
+    // 1. Commit in-progress pen stroke if switching away from pen
     if (activeTool !== 'pen' && penNodesRef.current.length > 0) {
       commitPenPath(false);
     }
 
+    // 2. Commit in-progress brush stroke if switching away from brush
+    if (activeTool !== 'brush' && hasActiveBrushStroke(canvas)) {
+      const res = finalizeBrushStroke(canvas);
+      if (res.committed) {
+        syncCanvasToStore();
+      }
+    }
+
+    // 3. Clear active mouse gesture and drag refs
     if (isMouseDownRef.current) {
       if (activeNodeDragRef.current) syncCanvasToStore();
       if (hasErasedDuringDragRef.current) syncCanvasToStore();
@@ -1591,45 +1558,19 @@ export const CanvasEditor: React.FC = React.memo(() => {
     lastEraserPosRef.current = null;
     hasErasedDuringDragRef.current = false;
 
-    const isPanModifierActive = isSpaceHeld || isSpacePressedRef.current || activeTool === 'pan';
+    // 4. Centralized Interaction Mode Application
+    applyCanvasInteractionMode(canvas, {
+      activeTool,
+      isSpaceHeld,
+      isPanning,
+      strokeWidth,
+      strokeColor,
+      strokeCap,
+      strokeJoin,
+      smoothing,
+    });
 
-    // While space-drag or pan modifier is held, keep canvas objects strictly non-interactive regardless of tool changes
-    if (isPanModifierActive) {
-      canvas.selection = false;
-      canvas.isDrawingMode = false;
-      canvas.defaultCursor = isPanning ? 'grabbing' : 'grab';
-      canvas.hoverCursor = isPanning ? 'grabbing' : 'grab';
-      if (canvas.upperCanvasEl) {
-        canvas.upperCanvasEl.style.cursor = isPanning ? 'grabbing' : 'grab';
-      }
-      canvas.forEachObject((obj: FabricObject) => {
-        obj.selectable = false;
-        obj.evented = false;
-      });
-      canvas.requestRenderAll();
-      renderOverlay();
-      return;
-    }
-
-    if (activeTool === 'select') {
-      canvas.isDrawingMode = false;
-      canvas.selection = true; // Drag over them to marquee-select all objects
-      canvas.defaultCursor = 'default';
-      canvas.hoverCursor = 'move';
-      canvas.forEachObject((obj: FabricObject) => {
-        obj.selectable = true;
-        obj.evented = true;
-      });
-      clearNodeEditing();
-    } else if (activeTool === 'direct-select') {
-      canvas.selection = false;
-      canvas.isDrawingMode = false;
-      canvas.defaultCursor = 'default';
-      canvas.hoverCursor = 'pointer';
-      canvas.forEachObject((obj: FabricObject) => {
-        obj.selectable = false;
-        obj.evented = true;
-      });
+    if (activeTool === 'direct-select') {
       if (!selectedPathObjRef.current) {
         const objs = canvas.getObjects();
         const p = objs.find((o) => o instanceof Path && (o as any).path) as Path | undefined;
@@ -1637,58 +1578,10 @@ export const CanvasEditor: React.FC = React.memo(() => {
           loadPathForNodeEditing(p);
         }
       }
-    } else if (activeTool === 'brush') {
-      canvas.selection = false;
-      canvas.isDrawingMode = true;
-      if (canvas.freeDrawingBrush) {
-        canvas.freeDrawingBrush.width = strokeWidth;
-        canvas.freeDrawingBrush.color = strokeColor;
-        canvas.freeDrawingBrush.strokeLineCap = strokeCap;
-        canvas.freeDrawingBrush.strokeLineJoin = strokeJoin;
-        (canvas.freeDrawingBrush as any).decimate = Math.max(0.5, (smoothing / 100) * 8);
-      }
-      canvas.defaultCursor = 'none';
-      canvas.hoverCursor = 'none';
-      if (canvas.upperCanvasEl) canvas.upperCanvasEl.style.cursor = 'none';
-      canvas.forEachObject((obj: FabricObject) => {
-        obj.selectable = false;
-        obj.evented = false;
-      });
-    } else if (activeTool === 'pen') {
-      clearNodeEditing();
-      canvas.selection = false;
-      canvas.isDrawingMode = false;
-      canvas.defaultCursor = 'crosshair';
-      canvas.hoverCursor = 'crosshair';
-      if (canvas.upperCanvasEl) canvas.upperCanvasEl.style.cursor = 'crosshair';
-      canvas.forEachObject((obj: FabricObject) => {
-        obj.selectable = false;
-        obj.evented = false;
-      });
-    } else if (activeTool === 'eraser') {
-      canvas.selection = false;
-      canvas.isDrawingMode = false;
-      canvas.defaultCursor = 'none';
-      canvas.hoverCursor = 'none';
-      if (canvas.upperCanvasEl) canvas.upperCanvasEl.style.cursor = 'none';
-      canvas.forEachObject((obj: FabricObject) => {
-        obj.selectable = false;
-        obj.evented = true;
-      });
     } else {
-      // Pan or other
-      canvas.selection = false;
-      canvas.isDrawingMode = false;
-      canvas.defaultCursor = 'grab';
-      canvas.hoverCursor = 'grab';
-      if (canvas.upperCanvasEl) canvas.upperCanvasEl.style.cursor = 'grab';
-      canvas.forEachObject((obj: FabricObject) => {
-        obj.selectable = false;
-        obj.evented = false;
-      });
+      clearNodeEditing();
     }
 
-    canvas.requestRenderAll();
     renderOverlay();
   }, [
     activeTool,
@@ -1704,6 +1597,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
     clearNodeEditing,
     loadPathForNodeEditing,
     renderOverlay,
+    syncCanvasToStore,
   ]);
 
   // Live update selected object(s) when stroke attributes change

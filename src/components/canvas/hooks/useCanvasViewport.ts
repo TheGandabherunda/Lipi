@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useUIStore } from '../../../store/uiStore';
 import type { Canvas as FabricCanvas } from 'fabric';
 import { isTypingInInputElement } from '../../../utils/keyboardUtils';
+import { applyCanvasInteractionMode } from '../utils/canvasInteractionMode';
 
 export interface UseCanvasViewportOptions {
   containerRef: React.RefObject<HTMLDivElement | null>;
@@ -32,6 +33,8 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
   const canvasHeight = useUIStore((s) => s.canvasHeight);
   const setCanvasSize = useUIStore((s) => s.setCanvasSize);
   const activeTool = useUIStore((s) => s.activeTool);
+  const panX = useUIStore((s) => s.panX);
+  const panY = useUIStore((s) => s.panY);
 
   // Resize Dragging
   const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
@@ -64,32 +67,36 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
     window.addEventListener('mouseup', handleMouseUp);
   }, [canvasWidth, canvasHeight, zoom, setCanvasSize]);
 
-  // Global Pointer / Mouse Move and Up for Panning
+  // Global Pointer Move and Up for Panning
   const stopPan = useCallback(() => {
     if (isPanningRef.current) {
       isPanningRef.current = false;
       setIsPanning(false);
-      const canvas = fabricCanvasRef.current;
-      if (canvas) {
-        const currentTool = useUIStore.getState().activeTool;
-        canvas.selection = currentTool === 'select' && !isSpacePressedRef.current;
-        if (canvas.upperCanvasEl) {
-          canvas.upperCanvasEl.style.cursor = isSpacePressedRef.current
-            ? 'grab'
-            : currentTool === 'pan'
-            ? 'grab'
-            : currentTool === 'brush' || currentTool === 'eraser'
-            ? 'none'
-            : currentTool === 'pen'
-            ? 'crosshair'
-            : 'default';
-        }
-      }
+      applyCanvasInteractionMode(fabricCanvasRef.current, {
+        activeTool: useUIStore.getState().activeTool,
+        isSpaceHeld: isSpacePressedRef.current,
+        isPanning: false,
+      });
     }
-  }, [activeTool, fabricCanvasRef]);
+  }, [fabricCanvasRef]);
+
+  const startPan = useCallback(
+    (clientX: number, clientY: number) => {
+      panStartPosRef.current = { x: clientX, y: clientY };
+      panOffsetRef.current = { x: panX, y: panY };
+      isPanningRef.current = true;
+      setIsPanning(true);
+      applyCanvasInteractionMode(fabricCanvasRef.current, {
+        activeTool: useUIStore.getState().activeTool,
+        isSpaceHeld: isSpacePressedRef.current || isSpaceHeld,
+        isPanning: true,
+      });
+    },
+    [panX, panY, isSpaceHeld, fabricCanvasRef]
+  );
 
   useEffect(() => {
-    const handleGlobalPointerMove = (e: MouseEvent | PointerEvent) => {
+    const handleGlobalPointerMove = (e: PointerEvent) => {
       if (isPanningRef.current) {
         const nx = e.clientX - panStartPosRef.current.x;
         const ny = e.clientY - panStartPosRef.current.y;
@@ -104,15 +111,11 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
     window.addEventListener('pointermove', handleGlobalPointerMove);
     window.addEventListener('pointerup', handleGlobalPointerUp);
     window.addEventListener('pointercancel', handleGlobalPointerUp);
-    window.addEventListener('mousemove', handleGlobalPointerMove);
-    window.addEventListener('mouseup', handleGlobalPointerUp);
 
     return () => {
       window.removeEventListener('pointermove', handleGlobalPointerMove);
       window.removeEventListener('pointerup', handleGlobalPointerUp);
       window.removeEventListener('pointercancel', handleGlobalPointerUp);
-      window.removeEventListener('mousemove', handleGlobalPointerMove);
-      window.removeEventListener('mouseup', handleGlobalPointerUp);
     };
   }, [setPan, stopPan]);
 
@@ -127,24 +130,11 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
         e.preventDefault();
         isSpacePressedRef.current = true;
         setIsSpaceHeld(true);
-        const canvas = fabricCanvasRef.current;
-        if (canvas) {
-          // Disable drawing mode, marquee selection, and object interactions immediately
-          canvas.isDrawingMode = false;
-          canvas.selection = false;
-          const activeObj = canvas.getActiveObject();
-          if (activeObj) {
-            activeObj.selectable = false;
-            activeObj.evented = false;
-          }
-          canvas.forEachObject((obj) => {
-            obj.selectable = false;
-            obj.evented = false;
-          });
-          if (canvas.upperCanvasEl) {
-            canvas.upperCanvasEl.style.cursor = 'grab';
-          }
-        }
+        applyCanvasInteractionMode(fabricCanvasRef.current, {
+          activeTool: useUIStore.getState().activeTool,
+          isSpaceHeld: true,
+          isPanning: isPanningRef.current,
+        });
       }
     };
 
@@ -153,31 +143,11 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
       if (e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar') {
         isSpacePressedRef.current = false;
         setIsSpaceHeld(false);
-        const canvas = fabricCanvasRef.current;
-        if (canvas) {
-          const currentTool = useUIStore.getState().activeTool;
-          canvas.isDrawingMode = currentTool === 'brush';
-          canvas.selection = currentTool === 'select';
-          canvas.forEachObject((obj) => {
-            obj.selectable = currentTool === 'select';
-            obj.evented = currentTool === 'select' || currentTool === 'direct-select' || currentTool === 'eraser';
-          });
-          const activeObj = canvas.getActiveObject();
-          if (activeObj) {
-            activeObj.selectable = currentTool === 'select';
-            activeObj.evented = currentTool === 'select';
-          }
-          if (!isPanningRef.current && canvas.upperCanvasEl) {
-            canvas.upperCanvasEl.style.cursor =
-              currentTool === 'brush' || currentTool === 'eraser'
-                ? 'none'
-                : currentTool === 'pan'
-                ? 'grab'
-                : currentTool === 'pen'
-                ? 'crosshair'
-                : 'default';
-          }
-        }
+        applyCanvasInteractionMode(fabricCanvasRef.current, {
+          activeTool: useUIStore.getState().activeTool,
+          isSpaceHeld: false,
+          isPanning: false,
+        });
         return;
       }
 
@@ -191,16 +161,11 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
       isSpacePressedRef.current = false;
       setIsSpaceHeld(false);
       stopPan();
-      const canvas = fabricCanvasRef.current;
-      if (canvas) {
-        const currentTool = useUIStore.getState().activeTool;
-        canvas.isDrawingMode = currentTool === 'brush';
-        canvas.selection = currentTool === 'select';
-        canvas.forEachObject((obj) => {
-          obj.selectable = currentTool === 'select';
-          obj.evented = currentTool === 'select' || currentTool === 'direct-select' || currentTool === 'eraser';
-        });
-      }
+      applyCanvasInteractionMode(fabricCanvasRef.current, {
+        activeTool: useUIStore.getState().activeTool,
+        isSpaceHeld: false,
+        isPanning: false,
+      });
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -212,7 +177,7 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('blur', handleWindowBlur);
     };
-  }, [activeTool, fabricCanvasRef, stopPan]);
+  }, [fabricCanvasRef, stopPan]);
 
   // Mouse Wheel Zoom
   useEffect(() => {
@@ -234,25 +199,6 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
       container.removeEventListener('wheel', handleWheel);
     };
   }, [containerRef, setZoom]);
-
-  // Programmatic / Direct Start Pan
-  const startPan = useCallback(
-    (clientX: number, clientY: number) => {
-      isPanningRef.current = true;
-      setIsPanning(true);
-      panStartPosRef.current = { x: clientX, y: clientY };
-      panOffsetRef.current = { x: useUIStore.getState().panX, y: useUIStore.getState().panY };
-
-      const canvas = fabricCanvasRef.current;
-      if (canvas) {
-        canvas.selection = false;
-        if (canvas.upperCanvasEl) {
-          canvas.upperCanvasEl.style.cursor = 'grabbing';
-        }
-      }
-    },
-    [fabricCanvasRef]
-  );
 
   // Workspace Mouse / Pointer Down Handler
   const handleWorkspaceMouseDown = useCallback(
