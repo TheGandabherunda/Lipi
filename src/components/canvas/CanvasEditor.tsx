@@ -176,16 +176,28 @@ export const CanvasEditor: React.FC = React.memo(() => {
   // Active outline for the current Unicode
   const activeOutline = activeOutlines[activeUnicode];
 
-  // Compute guideline coordinates matching the active letter's exact OpenType advance width
+  // Compute guideline coordinates matching the active letter's exact OpenType advance width and sidebearings
   const guidePositions = useMemo(() => {
-    const advance = activeOutline?.advanceWidth || currentGlyph?.advanceWidth || 778;
+    const advance = currentGlyph?.advanceWidth || activeOutline?.advanceWidth || 778;
+    const lsb = currentGlyph?.leftSideBearing;
+    const rsb = currentGlyph?.rightSideBearing;
     return calculateGuidelinePositions(
       canvasWidth,
       canvasHeight,
       metrics,
-      advance
+      advance,
+      lsb,
+      rsb
     );
-  }, [canvasWidth, canvasHeight, metrics, activeOutline?.advanceWidth, currentGlyph?.advanceWidth]);
+  }, [
+    canvasWidth,
+    canvasHeight,
+    metrics,
+    currentGlyph?.advanceWidth,
+    currentGlyph?.leftSideBearing,
+    currentGlyph?.rightSideBearing,
+    activeOutline?.advanceWidth,
+  ]);
 
   // Render guidelines & clean outline template on the guide canvas
   const drawGuidelines = useCallback(() => {

@@ -54,6 +54,7 @@ interface UIStoreState {
   isSpacingPanelOpen: boolean;
   isComponentsDrawerOpen: boolean;
   isOnboardingOpen: boolean;
+  isReferencePanelOpen: boolean;
 
   // Global Quick Toast
   toastMessage: string | null;
@@ -102,6 +103,8 @@ interface UIStoreState {
   setIsComponentsDrawerOpen: (open: boolean) => void;
   setOnboardingOpen: (open: boolean) => void;
   setIsOnboardingOpen: (open: boolean) => void;
+  setReferencePanelOpen: (open: boolean) => void;
+  setIsReferencePanelOpen: (open: boolean) => void;
   showToast: (msg: string) => void;
   hideToast: () => void;
 }
@@ -167,6 +170,7 @@ export const useUIStore = create<UIStoreState>((set) => ({
   isSpacingPanelOpen: false,
   isComponentsDrawerOpen: false,
   isOnboardingOpen: false,
+  isReferencePanelOpen: false,
   toastMessage: null,
   showToast: (msg: string) => {
     set({ toastMessage: msg });
@@ -238,4 +242,6 @@ export const useUIStore = create<UIStoreState>((set) => ({
   setIsComponentsDrawerOpen: (isComponentsDrawerOpen) => set({ isComponentsDrawerOpen }),
   setOnboardingOpen: (isOnboardingOpen) => set({ isOnboardingOpen }),
   setIsOnboardingOpen: (isOnboardingOpen) => set({ isOnboardingOpen }),
+  setReferencePanelOpen: (isReferencePanelOpen) => set({ isReferencePanelOpen }),
+  setIsReferencePanelOpen: (isReferencePanelOpen) => set({ isReferencePanelOpen }),
 }));

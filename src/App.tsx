@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { TopNavigation } from './components/toolbar/TopNavigation';
 import { LeftIllustrationToolbar } from './components/toolbar/LeftIllustrationToolbar';
 import { CanvasEditor } from './components/canvas/CanvasEditor';
+import { ReferenceFontComparison } from './components/canvas/ReferenceFontComparison';
 import { RightSideGlyphGrid } from './components/glyph-grid/RightSideGlyphGrid';
 import { GlyphSpacingInspector } from './components/spacing/GlyphSpacingInspector';
 import { KannadaComponentsDrawer } from './components/components-library/KannadaComponentsDrawer';
@@ -19,6 +20,8 @@ export const App: React.FC = () => {
 
   // Font Live Type Preview Modal State
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const isReferencePanelOpen = useUIStore((s) => s.isReferencePanelOpen);
+  const setIsReferencePanelOpen = useUIStore((s) => s.setIsReferencePanelOpen);
 
   // Automatically trigger onboarding walkthrough for first-time visitors
   useEffect(() => {
@@ -43,6 +46,11 @@ export const App: React.FC = () => {
           <CanvasEditor />
           {/* Floating Spacing & Sidebearing Inspector */}
           <GlyphSpacingInspector />
+          {/* Floating Reference Font Overlay Controls */}
+          <ReferenceFontComparison
+            isOpen={isReferencePanelOpen}
+            onClose={() => setIsReferencePanelOpen(false)}
+          />
         </main>
 
         {/* Right Side: Cards Grid with Live SVG Written Preview & Actual Word in Top Right Corner */}

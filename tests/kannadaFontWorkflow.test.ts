@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useGlyphStore } from '../src/store/glyphStore';
+import { useUIStore } from '../src/store/uiStore';
 import { KANNADA_CHARACTERS_LIST, initialKannadaGlyphs } from '../src/constants/kannadaCharacters';
 import { KANNADA_STANDARD_COMPONENTS } from '../src/constants/kannadaComponents';
 import { validateProjectPreflight } from '../src/utils/preflightValidator';
+import { calculateGuidelinePositions } from '../src/components/canvas/CanvasGuidelines';
 import type { VectorPathData, GlyphData } from '../src/types/glyph';
 
 describe('Complete Kannada Font Workflow', () => {
@@ -312,6 +314,58 @@ describe('Complete Kannada Font Workflow', () => {
       // Add stroke to 'ಖ' (U+0C96)
       store.updateGlyphPaths('U+0C96', [{ pathString: 'M 60 60 L 160 160', strokeWidth: 20 }]);
       expect(getEditedCount()).toBe(2);
+    });
+
+    it('calculates guideline coordinates accurately with custom advance, LSB, and RSB', () => {
+      const metrics = useGlyphStore.getState().metadata.metrics;
+      const guides = calculateGuidelinePositions(
+        800,
+        800,
+        metrics,
+        900, // advance
+        75,  // lsb
+        85   // rsb
+      );
+
+      expect(guides.leftSideBearingUnits).toBe(75);
+      expect(guides.rightSideBearingUnits).toBe(85);
+      expect(guides.rightAdvanceX).toBeGreaterThan(guides.leftMarginX);
+      expect(guides.lsbX).toBeGreaterThan(guides.leftMarginX);
+      expect(guides.rsbX).toBeLessThan(guides.rightAdvanceX);
+    });
+
+    it('toggles Reference Font overlay panel state in UI store', () => {
+      expect(useUIStore.getState().isReferencePanelOpen).toBe(false);
+
+      useUIStore.getState().setIsReferencePanelOpen(true);
+      expect(useUIStore.getState().isReferencePanelOpen).toBe(true);
+
+      useUIStore.getState().setIsReferencePanelOpen(false);
+      expect(useUIStore.getState().isReferencePanelOpen).toBe(false);
+    });
+
+    it('blocks preflight export when 0 glyphs are drawn or Unicode mapping is invalid', () => {
+      const metadata = useGlyphStore.getState().metadata;
+      const emptyGlyphs = useGlyphStore.getState().glyphs;
+
+      // Case 1: 0 drawn glyphs
+      const emptyReport = validateProjectPreflight(metadata, emptyGlyphs);
+      expect(emptyReport.canExport).toBe(false);
+      expect(emptyReport.issues.some((i) => i.message.includes('No glyphs have been drawn'))).toBe(true);
+
+      // Case 2: Invalid Unicode mapping format
+      const invalidUnicodeGlyphs: Record<string, GlyphData> = {
+        bad_code: {
+          ...initialKannadaGlyphs['U+0C85'],
+          unicode: 'NOT_A_UNICODE',
+          paths: [{ pathString: 'M 0 0 L 100 100', strokeWidth: 10 }],
+          advanceWidth: 800,
+        },
+      };
+
+      const invalidReport = validateProjectPreflight(metadata, invalidUnicodeGlyphs);
+      expect(invalidReport.canExport).toBe(false);
+      expect(invalidReport.issues.some((i) => i.message.includes('Invalid Unicode format'))).toBe(true);
     });
   });
 });

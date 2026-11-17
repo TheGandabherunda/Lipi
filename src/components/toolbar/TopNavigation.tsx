@@ -19,6 +19,7 @@ import {
   X,
   Layers,
   MoveHorizontal,
+  Eye,
   HelpCircle,
 } from 'lucide-react';
 import { clsx } from 'clsx';
@@ -54,6 +55,8 @@ export const TopNavigation: React.FC<TopNavigationProps> = ({ onOpenPreview }) =
   const setShortcutsModalOpen = useUIStore((s) => s.setShortcutsModalOpen);
   const isSpacingPanelOpen = useUIStore((s) => s.isSpacingPanelOpen);
   const setIsSpacingPanelOpen = useUIStore((s) => s.setIsSpacingPanelOpen);
+  const isReferencePanelOpen = useUIStore((s) => s.isReferencePanelOpen);
+  const setIsReferencePanelOpen = useUIStore((s) => s.setIsReferencePanelOpen);
   const isComponentsDrawerOpen = useUIStore((s) => s.isComponentsDrawerOpen);
   const setIsComponentsDrawerOpen = useUIStore((s) => s.setIsComponentsDrawerOpen);
   const setIsOnboardingOpen = useUIStore((s) => s.setIsOnboardingOpen);
@@ -273,6 +276,22 @@ export const TopNavigation: React.FC<TopNavigationProps> = ({ onOpenPreview }) =
         >
           <MoveHorizontal className="w-3.5 h-3.5" />
           <span className="hidden md:inline">Spacing Studio</span>
+        </button>
+
+        {/* Reference Font Layer Toggle Button */}
+        <button
+          type="button"
+          onClick={() => setIsReferencePanelOpen(!isReferencePanelOpen)}
+          className={clsx(
+            'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer shadow-2xs',
+            isReferencePanelOpen
+              ? 'bg-indigo-600 text-white border-indigo-600 shadow-indigo-600/20'
+              : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700'
+          )}
+          title="Open Reference Font Layer & Overlay Settings"
+        >
+          <Eye className="w-3.5 h-3.5" />
+          <span className="hidden md:inline">Reference</span>
         </button>
 
         {/* Grid & Snapping Dropdown */}

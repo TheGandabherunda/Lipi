@@ -43,7 +43,9 @@ export function calculateGuidelinePositions(
   canvasWidth: number,
   canvasHeight: number,
   metrics: FontMetrics,
-  advanceWidth: number
+  advanceWidth: number,
+  leftSideBearing?: number,
+  rightSideBearing?: number
 ): GuideMetrics {
   const upm = metrics.unitsPerEm || 1000;
   const ascenderUnits = metrics.ascender || 790;
@@ -51,8 +53,18 @@ export function calculateGuidelinePositions(
   const baselineUnits = metrics.baseline !== undefined ? metrics.baseline : 0;
   const descenderUnits = metrics.descender !== undefined ? metrics.descender : -420;
   const mahapranaUnits = metrics.mahaprana !== undefined ? metrics.mahaprana : -144;
-  const leftSideBearingUnits = metrics.leftSideBearing !== undefined ? metrics.leftSideBearing : 50;
-  const rightSideBearingUnits = metrics.rightSideBearing !== undefined ? metrics.rightSideBearing : 50;
+  const leftSideBearingUnits =
+    leftSideBearing !== undefined
+      ? leftSideBearing
+      : metrics.leftSideBearing !== undefined
+      ? metrics.leftSideBearing
+      : 50;
+  const rightSideBearingUnits =
+    rightSideBearing !== undefined
+      ? rightSideBearing
+      : metrics.rightSideBearing !== undefined
+      ? metrics.rightSideBearing
+      : 50;
 
   const totalSpanUnits = Math.max(100, ascenderUnits - descenderUnits); // e.g. 1210
   const glyphAdvance = advanceWidth || Math.round(upm * 0.78);
