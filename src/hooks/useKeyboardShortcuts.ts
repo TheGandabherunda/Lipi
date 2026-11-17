@@ -1,13 +1,13 @@
 import { useEffect } from 'react';
 import { useUIStore } from '../store/uiStore';
 import { useGlyphStore } from '../store/glyphStore';
+import { isTypingInInputElement } from '../utils/keyboardUtils';
 
 export function useKeyboardShortcuts() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't intercept if user is typing into an input or textarea
-      const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+      // Don't intercept if user is typing into an input, textarea, select, or editable element
+      if (isTypingInInputElement(e)) {
         return;
       }
 

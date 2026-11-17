@@ -9,14 +9,27 @@ import type { VectorPathData } from '../../../types/glyph';
 
 export interface UseCanvasClipboardOptions {
   fabricCanvasRef: React.RefObject<FabricCanvas | null>;
-  syncToStoreDebounced: () => void;
+  syncToStoreDebounced?: () => void;
+  syncCanvasToStore?: () => void;
 }
 
-export function useCanvasClipboard({ fabricCanvasRef, syncToStoreDebounced }: UseCanvasClipboardOptions) {
+export function useCanvasClipboard({
+  fabricCanvasRef,
+  syncToStoreDebounced,
+  syncCanvasToStore,
+}: UseCanvasClipboardOptions) {
   const activeUnicode = useGlyphStore((s) => s.activeUnicode);
   const currentGlyph = useGlyphStore((s) => s.glyphs[s.activeUnicode]);
   const activeTool = useUIStore((s) => s.activeTool);
   const strokeColor = useUIStore((s) => s.strokeColor);
+
+  const sync = useCallback(() => {
+    if (syncCanvasToStore) {
+      syncCanvasToStore();
+    } else if (syncToStoreDebounced) {
+      syncToStoreDebounced();
+    }
+  }, [syncCanvasToStore, syncToStoreDebounced]);
 
   // 1. COPY ACTION
   const handleCopy = useCallback(() => {
@@ -62,14 +75,19 @@ export function useCanvasClipboard({ fabricCanvasRef, syncToStoreDebounced }: Us
 
     const newlyAdded: FabricObject[] = [];
     const clonedClipboardPaths = cloneVectorPaths(clip.paths);
+    let failedCount = 0;
 
     clonedClipboardPaths.forEach((p, idx) => {
       try {
         const translatedStr = dx !== 0 || dy !== 0 ? translateSVGPathString(p.pathString, dx, dy) : p.pathString;
+        const hasFill = Boolean(p.fillColor && p.fillColor !== 'none' && p.fillColor !== 'transparent');
+        const hasStroke = Boolean(p.strokeWidth !== 0 && p.strokeColor !== 'none' && p.strokeColor !== 'transparent');
+        const shouldStroke = hasStroke || !hasFill;
+
         const pathObj = new Path(translatedStr, {
-          stroke: p.fillColor ? undefined : (p.strokeColor || strokeColor),
-          strokeWidth: p.fillColor ? 0 : (p.strokeWidth || 16),
-          fill: p.fillColor || undefined,
+          stroke: shouldStroke ? (p.strokeColor || strokeColor) : undefined,
+          strokeWidth: shouldStroke ? (p.strokeWidth || 16) : 0,
+          fill: hasFill ? p.fillColor : undefined,
           strokeLineCap: p.strokeLineCap || 'round',
           strokeLineJoin: p.strokeLineJoin || 'round',
           selectable: activeTool === 'select',
@@ -79,9 +97,16 @@ export function useCanvasClipboard({ fabricCanvasRef, syncToStoreDebounced }: Us
         canvas.add(pathObj);
         newlyAdded.push(pathObj);
       } catch (e) {
+        failedCount++;
         console.warn('Failed to paste path:', e);
       }
     });
+
+    if (failedCount > 0) {
+      useUIStore.getState().showToast(
+        `Warning: ${failedCount} stroke${failedCount > 1 ? 's' : ''} could not be parsed or pasted.`
+      );
+    }
 
     if (newlyAdded.length > 0) {
       canvas.discardActiveObject();
@@ -92,13 +117,13 @@ export function useCanvasClipboard({ fabricCanvasRef, syncToStoreDebounced }: Us
         canvas.setActiveObject(sel);
       }
       canvas.requestRenderAll();
-      syncToStoreDebounced();
+      sync();
 
       useUIStore.getState().showToast(
         `Pasted ${newlyAdded.length} stroke${newlyAdded.length > 1 ? 's' : ''} from '${clip.sourceCharacter}' into '${currentGlyph?.character || 'ಅ'}'!`
       );
     }
-  }, [activeUnicode, currentGlyph, strokeColor, activeTool, fabricCanvasRef, syncToStoreDebounced]);
+  }, [activeUnicode, currentGlyph, strokeColor, activeTool, fabricCanvasRef, sync]);
 
   // 3. DUPLICATE ACTION
   const handleDuplicate = useCallback(() => {
@@ -136,10 +161,10 @@ export function useCanvasClipboard({ fabricCanvasRef, syncToStoreDebounced }: Us
         canvas.setActiveObject(sel);
       }
       canvas.requestRenderAll();
-      syncToStoreDebounced();
+      sync();
       useUIStore.getState().showToast(`Duplicated ${newlyAdded.length} stroke${newlyAdded.length > 1 ? 's' : ''}`);
     }
-  }, [fabricCanvasRef, syncToStoreDebounced]);
+  }, [fabricCanvasRef, sync]);
 
   // 4. CUT ACTION
   const handleCut = useCallback(() => {
@@ -149,11 +174,13 @@ export function useCanvasClipboard({ fabricCanvasRef, syncToStoreDebounced }: Us
     if (activeObjs.length === 0) return;
 
     handleCopy();
+    const count = activeObjs.length;
     activeObjs.forEach((obj) => canvas.remove(obj));
     canvas.discardActiveObject();
     canvas.requestRenderAll();
-    syncToStoreDebounced();
-  }, [fabricCanvasRef, handleCopy, syncToStoreDebounced]);
+    sync();
+    useUIStore.getState().showToast(`Cut ${count} stroke${count > 1 ? 's' : ''}`);
+  }, [fabricCanvasRef, handleCopy, sync]);
 
   // Register Global Canvas Shortcuts / Events
   useEffect(() => {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useUIStore } from '../../../store/uiStore';
 import type { Canvas as FabricCanvas } from 'fabric';
+import { isTypingInInputElement } from '../../../utils/keyboardUtils';
 
 export interface UseCanvasViewportOptions {
   containerRef: React.RefObject<HTMLDivElement | null>;
@@ -104,11 +105,10 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
     };
   }, [activeTool, fabricCanvasRef, setPan]);
 
-  // Spacebar Handlers for Panning
+  // Spacebar Handlers for Panning & Window Blur Safety
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+      if (isTypingInInputElement(e)) {
         return;
       }
 
@@ -118,9 +118,13 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
         setIsSpaceHeld(true);
         const canvas = fabricCanvasRef.current;
         if (canvas) {
-          // Disable drawing mode and marquee selection immediately so space-drag cannot draw or select
+          // Disable drawing mode, marquee selection, and object interactions immediately
           canvas.isDrawingMode = false;
           canvas.selection = false;
+          canvas.forEachObject((obj) => {
+            obj.selectable = false;
+            obj.evented = false;
+          });
           if (canvas.upperCanvasEl) {
             canvas.upperCanvasEl.style.cursor = 'grab';
           }
@@ -129,8 +133,7 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+      if (isTypingInInputElement(e)) {
         return;
       }
 
@@ -142,6 +145,10 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
           const currentTool = useUIStore.getState().activeTool;
           canvas.isDrawingMode = currentTool === 'brush';
           canvas.selection = currentTool === 'select';
+          canvas.forEachObject((obj) => {
+            obj.selectable = currentTool === 'select';
+            obj.evented = currentTool === 'select' || currentTool === 'direct-select' || currentTool === 'eraser';
+          });
           if (!isPanningRef.current && canvas.upperCanvasEl) {
             canvas.upperCanvasEl.style.cursor =
               currentTool === 'brush' || currentTool === 'eraser'
@@ -156,12 +163,34 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
       }
     };
 
+    // Safely release Spacebar and Pan state if the window loses focus
+    const handleWindowBlur = () => {
+      isSpacePressedRef.current = false;
+      setIsSpaceHeld(false);
+      if (isPanningRef.current) {
+        isPanningRef.current = false;
+        setIsPanning(false);
+      }
+      const canvas = fabricCanvasRef.current;
+      if (canvas) {
+        const currentTool = useUIStore.getState().activeTool;
+        canvas.isDrawingMode = currentTool === 'brush';
+        canvas.selection = currentTool === 'select';
+        canvas.forEachObject((obj) => {
+          obj.selectable = currentTool === 'select';
+          obj.evented = currentTool === 'select' || currentTool === 'direct-select' || currentTool === 'eraser';
+        });
+      }
+    };
+
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleWindowBlur);
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleWindowBlur);
     };
   }, [activeTool, fabricCanvasRef]);
 
@@ -220,6 +249,7 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
     isSpaceHeld,
     isSpacePressedRef,
     isPanning,
+    isPanningRef,
     startPan,
     handleResizeMouseDown,
     handleWorkspaceMouseDown,

@@ -42,6 +42,7 @@ interface GlyphStoreState {
   // Glyph & Canvas Operations
   setActiveUnicode: (unicode: string) => void;
   updateActiveGlyphPaths: (paths: VectorPathData[], recordHistory?: boolean) => void;
+  updateGlyphPaths: (unicode: string, paths: VectorPathData[], recordHistory?: boolean) => void;
   updateAdvanceWidth: (unicode: string, width: number) => void;
   clearActiveGlyph: () => void;
 
@@ -131,19 +132,41 @@ const DEFAULT_METADATA: LipiProjectMetadata = {
 
 const initialClonedGlyphs = cloneGlyphRecord(initialKannadaGlyphs);
 
+export function pathsAreEqual(a?: VectorPathData[], b?: VectorPathData[]): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const p1 = a[i];
+    const p2 = b[i];
+    if (
+      p1.pathString !== p2.pathString ||
+      p1.strokeWidth !== p2.strokeWidth ||
+      p1.strokeColor !== p2.strokeColor ||
+      p1.fillColor !== p2.fillColor ||
+      p1.strokeLineCap !== p2.strokeLineCap ||
+      p1.strokeLineJoin !== p2.strokeLineJoin
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+const initialHistories: Record<string, GlyphHistoryStack> = {};
+for (const code of Object.keys(initialClonedGlyphs)) {
+  initialHistories[code] = { stack: [[]], index: 0 };
+}
+
 export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
   metadata: DEFAULT_METADATA,
   glyphs: initialClonedGlyphs,
   weightProfiles: { 400: cloneGlyphRecord(initialClonedGlyphs) },
   weightProfileHistories: {
-    400: {
-      'U+0C85': { stack: [[]], index: 0 },
-    },
+    400: initialHistories,
   },
   activeUnicode: 'U+0C85', // Default: 'ಅ'
-  glyphHistories: {
-    'U+0C85': { stack: [[]], index: 0 },
-  },
+  glyphHistories: initialHistories,
   history: [[]],
   historyIndex: 0,
   clipboard: null,
@@ -321,18 +344,18 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
     });
   },
 
-  updateActiveGlyphPaths: (paths: VectorPathData[], recordHistory = true) => {
-    const { activeUnicode, glyphs, glyphHistories } = get();
-    const currentGlyph = glyphs[activeUnicode];
-    if (!currentGlyph) return;
+  updateGlyphPaths: (unicode: string, paths: VectorPathData[], recordHistory = true) => {
+    const { glyphs, glyphHistories, activeUnicode } = get();
+    const targetGlyph = glyphs[unicode];
+    if (!targetGlyph) return;
 
     const clonedPaths = cloneVectorPaths(paths);
     const isEdited = clonedPaths.length > 0;
     const updatedGlyphs = {
       ...glyphs,
-      [activeUnicode]: {
-        ...currentGlyph,
-        paths: clonedPaths,
+      [unicode]: {
+        ...targetGlyph,
+        paths: cloneVectorPaths(clonedPaths),
         isEdited,
         lastModified: Date.now(),
       },
@@ -343,15 +366,22 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
       return;
     }
 
-    // Retrieve current history for this specific glyph
-    const activeHistory = glyphHistories[activeUnicode] || {
-      stack: [cloneVectorPaths(currentGlyph.paths || [])],
+    // Retrieve or initialize current history for this specific glyph
+    const targetHistory = glyphHistories[unicode] || {
+      stack: [cloneVectorPaths(targetGlyph.paths || [])],
       index: 0,
     };
 
+    // If new paths are identical to top-of-stack, do not push redundant duplicate
+    const currentTop = targetHistory.stack[targetHistory.index];
+    if (currentTop && pathsAreEqual(currentTop, clonedPaths)) {
+      set({ glyphs: updatedGlyphs });
+      return;
+    }
+
     // Truncate redo states and push new state
-    const newStack = activeHistory.stack
-      .slice(0, activeHistory.index + 1)
+    const newStack = targetHistory.stack
+      .slice(0, targetHistory.index + 1)
       .map((entry) => cloneVectorPaths(entry));
     newStack.push(cloneVectorPaths(clonedPaths));
 
@@ -365,15 +395,29 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
       index: newStack.length - 1,
     };
 
-    set({
-      glyphs: updatedGlyphs,
-      glyphHistories: {
-        ...glyphHistories,
-        [activeUnicode]: updatedStackEntry,
-      },
-      history: newStack,
-      historyIndex: updatedStackEntry.index,
-    });
+    const updatedHistories = {
+      ...glyphHistories,
+      [unicode]: updatedStackEntry,
+    };
+
+    if (unicode === activeUnicode) {
+      set({
+        glyphs: updatedGlyphs,
+        glyphHistories: updatedHistories,
+        history: newStack.map((entry) => cloneVectorPaths(entry)),
+        historyIndex: updatedStackEntry.index,
+      });
+    } else {
+      set({
+        glyphs: updatedGlyphs,
+        glyphHistories: updatedHistories,
+      });
+    }
+  },
+
+  updateActiveGlyphPaths: (paths: VectorPathData[], recordHistory = true) => {
+    const { activeUnicode } = get();
+    get().updateGlyphPaths(activeUnicode, paths, recordHistory);
   },
 
   updateAdvanceWidth: (unicode: string, width: number) => {
@@ -587,6 +631,11 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
 
   resetProject: (name = 'New-Lipi-Font') => {
     const freshGlyphs = cloneGlyphRecord(initialKannadaGlyphs);
+    const freshHistories: Record<string, GlyphHistoryStack> = {};
+    for (const code of Object.keys(freshGlyphs)) {
+      freshHistories[code] = { stack: [[]], index: 0 };
+    }
+
     set({
       metadata: {
         ...DEFAULT_METADATA,
@@ -597,17 +646,17 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
       glyphs: freshGlyphs,
       weightProfiles: { 400: cloneGlyphRecord(freshGlyphs) },
       weightProfileHistories: {
-        400: {
-          'U+0C85': { stack: [[]], index: 0 },
-        },
+        400: freshHistories,
       },
       activeUnicode: 'U+0C85',
-      glyphHistories: {
-        'U+0C85': { stack: [[]], index: 0 },
-      },
+      glyphHistories: freshHistories,
       history: [[]],
       historyIndex: 0,
     });
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('lipi:project-loaded'));
+    }
   },
 
   serializeLipiProject: () => {
@@ -818,6 +867,10 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
         history: activeHistory.stack.map((entry) => cloneVectorPaths(entry)),
         historyIndex: activeHistory.index,
       });
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('lipi:project-loaded'));
+      }
 
       return { success: true };
     } catch (err) {

@@ -3,7 +3,7 @@ import { Canvas, PencilBrush, Path, ActiveSelection, type FabricObject } from 'f
 import { useGlyphStore } from '../../store/glyphStore';
 import { useUIStore } from '../../store/uiStore';
 import { calculateGuidelinePositions, renderCanvasGuidelines } from './CanvasGuidelines';
-import { cloneVectorPaths } from '../../utils/glyphUtils';
+import type { VectorPathData } from '../../types/glyph';
 import {
   eraseStrokesAlongSegment,
   samplePointsFromFabricSegments,
@@ -43,6 +43,7 @@ import {
   serializeCanvasPaths,
   rehydrateFabricPath,
 } from './utils/canvasSerialization';
+import { isTypingInInputElement } from '../../utils/keyboardUtils';
 
 export const CanvasEditor: React.FC = React.memo(() => {
   const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
@@ -52,6 +53,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
   const fabricCanvasRef = useRef<Canvas | null>(null);
   const isSyncingRef = useRef<boolean>(false);
   const isInternalUpdateRef = useRef<boolean>(false);
+  const isMouseDownRef = useRef<boolean>(false);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Pen tool & Eraser interactive state refs
@@ -61,6 +63,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
   const isNearStartRef = useRef<boolean>(false);
   const penDragStartPosRef = useRef<Point | null>(null);
   const lastEraserPosRef = useRef<Point | null>(null);
+  const hasErasedDuringDragRef = useRef<boolean>(false);
 
   // Direct selection & Node-level editing interactive state refs
   const selectedPathObjRef = useRef<Path | null>(null);
@@ -105,7 +108,6 @@ export const CanvasEditor: React.FC = React.memo(() => {
   const activeUnicode = useGlyphStore((s) => s.activeUnicode);
   const currentGlyph = useGlyphStore((s) => s.glyphs[s.activeUnicode]);
   const metrics = useGlyphStore((s) => s.metadata.metrics);
-  const updateActiveGlyphPaths = useGlyphStore((s) => s.updateActiveGlyphPaths);
   const clipboard = useGlyphStore((s) => s.clipboard);
 
   const activeTool = useUIStore((s) => s.activeTool);
@@ -205,19 +207,26 @@ export const CanvasEditor: React.FC = React.memo(() => {
     });
   }, [activeTool, penMode, strokeColor, strokeWidth, strokeCap, strokeJoin, eraserSize]);
 
-  // Debounced sync to store for 60fps drawing
-  const syncToStoreDebounced = useCallback(() => {
-    if (isSyncingRef.current) return;
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
-
-    debounceTimerRef.current = setTimeout(() => {
-      const paths = serializeCanvasPaths(fabricCanvasRef.current);
+  // Synchronous sync to store: creates an immediate, atomic history snapshot
+  const syncCanvasToStore = useCallback(
+    (recordHistory = true, customPaths?: VectorPathData[]) => {
+      if (isSyncingRef.current) return;
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+      const canvas = fabricCanvasRef.current;
+      const paths = customPaths || serializeCanvasPaths(canvas);
       isInternalUpdateRef.current = true;
-      updateActiveGlyphPaths(paths, true);
-    }, 150);
-  }, [updateActiveGlyphPaths]);
+      useGlyphStore.getState().updateActiveGlyphPaths(paths, recordHistory);
+    },
+    []
+  );
+
+  // Sync to store helper (immediately synchronizes completed actions)
+  const syncToStoreDebounced = useCallback(() => {
+    syncCanvasToStore(true);
+  }, [syncCanvasToStore]);
 
   // Direct Selection: Loads a Fabric Path into editable subpaths
   const loadPathForNodeEditing = useCallback(
@@ -278,9 +287,9 @@ export const CanvasEditor: React.FC = React.memo(() => {
     setSelectedNodesCount(0);
     setActiveNodeCoords(null);
     canvas.requestRenderAll();
-    syncToStoreDebounced();
+    syncCanvasToStore();
     renderOverlay();
-  }, [clearNodeEditing, renderOverlay, syncToStoreDebounced]);
+  }, [clearNodeEditing, renderOverlay, syncCanvasToStore]);
 
   // Nudge selected anchor node(s) with arrow keys
   const nudgeSelectedNodes = useCallback(
@@ -322,10 +331,10 @@ export const CanvasEditor: React.FC = React.memo(() => {
       }
 
       canvas.requestRenderAll();
-      syncToStoreDebounced();
+      syncCanvasToStore();
       renderOverlay();
     },
-    [renderOverlay, syncToStoreDebounced]
+    [renderOverlay, syncCanvasToStore]
   );
 
   // Convert selected nodes to Smooth (Bézier handles)
@@ -348,9 +357,9 @@ export const CanvasEditor: React.FC = React.memo(() => {
     const newPath = rebuildFabricPathFromSubpaths(pathObj, editableSubpathsRef.current, canvas);
     if (newPath) selectedPathObjRef.current = newPath;
     canvas.requestRenderAll();
-    syncToStoreDebounced();
+    syncCanvasToStore();
     renderOverlay();
-  }, [renderOverlay, syncToStoreDebounced]);
+  }, [renderOverlay, syncCanvasToStore]);
 
   // Convert selected nodes to Corner (sharp angles)
   const convertSelectedNodesToCorner = useCallback(() => {
@@ -371,9 +380,9 @@ export const CanvasEditor: React.FC = React.memo(() => {
     const newPath = rebuildFabricPathFromSubpaths(pathObj, editableSubpathsRef.current, canvas);
     if (newPath) selectedPathObjRef.current = newPath;
     canvas.requestRenderAll();
-    syncToStoreDebounced();
+    syncCanvasToStore();
     renderOverlay();
-  }, [renderOverlay, syncToStoreDebounced]);
+  }, [renderOverlay, syncCanvasToStore]);
 
   // Reverse active path winding direction
   const reverseActivePathDirection = useCallback(() => {
@@ -385,9 +394,9 @@ export const CanvasEditor: React.FC = React.memo(() => {
     const newPath = rebuildFabricPathFromSubpaths(pathObj, editableSubpathsRef.current, canvas);
     if (newPath) selectedPathObjRef.current = newPath;
     canvas.requestRenderAll();
-    syncToStoreDebounced();
+    syncCanvasToStore();
     renderOverlay();
-  }, [renderOverlay, syncToStoreDebounced]);
+  }, [renderOverlay, syncCanvasToStore]);
 
   // Toggle active path closed / open
   const toggleActivePathClosed = useCallback(() => {
@@ -402,9 +411,9 @@ export const CanvasEditor: React.FC = React.memo(() => {
     const newPath = rebuildFabricPathFromSubpaths(pathObj, editableSubpathsRef.current, canvas);
     if (newPath) selectedPathObjRef.current = newPath;
     canvas.requestRenderAll();
-    syncToStoreDebounced();
+    syncCanvasToStore();
     renderOverlay();
-  }, [renderOverlay, syncToStoreDebounced]);
+  }, [renderOverlay, syncCanvasToStore]);
 
   // High-precision coordinate update for selected node
   const updateSelectedNodeCoordinate = useCallback(
@@ -440,6 +449,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
     isSpaceHeld,
     isSpacePressedRef,
     isPanning,
+    isPanningRef,
     startPan,
     handleResizeMouseDown,
     handleWorkspaceMouseDown,
@@ -451,6 +461,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
   // Global canvas clipboard actions (Copy, Paste, Cut, Duplicate)
   const { handleCopy, handlePaste, handleCut, handleDuplicate } = useCanvasClipboard({
     fabricCanvasRef,
+    syncCanvasToStore,
     syncToStoreDebounced,
   });
 
@@ -463,10 +474,10 @@ export const CanvasEditor: React.FC = React.memo(() => {
     activeObjs.forEach((obj) => canvas.remove(obj));
     canvas.discardActiveObject();
     canvas.requestRenderAll();
-    syncToStoreDebounced();
+    syncCanvasToStore();
     setContextMenu(null);
     useUIStore.getState().showToast(`Deleted ${activeObjs.length} stroke${activeObjs.length > 1 ? 's' : ''}`);
-  }, [syncToStoreDebounced]);
+  }, [syncCanvasToStore]);
 
   // 6. FLIP X ACTION
   const handleFlipX = useCallback(() => {
@@ -477,9 +488,9 @@ export const CanvasEditor: React.FC = React.memo(() => {
     activeObj.set('flipX', !activeObj.flipX);
     activeObj.setCoords();
     canvas.requestRenderAll();
-    syncToStoreDebounced();
+    syncCanvasToStore();
     useUIStore.getState().showToast('Flipped stroke horizontally');
-  }, [syncToStoreDebounced]);
+  }, [syncCanvasToStore]);
 
   // 7. FLIP Y ACTION
   const handleFlipY = useCallback(() => {
@@ -490,9 +501,9 @@ export const CanvasEditor: React.FC = React.memo(() => {
     activeObj.set('flipY', !activeObj.flipY);
     activeObj.setCoords();
     canvas.requestRenderAll();
-    syncToStoreDebounced();
+    syncCanvasToStore();
     useUIStore.getState().showToast('Flipped stroke vertically');
-  }, [syncToStoreDebounced]);
+  }, [syncCanvasToStore]);
 
   // 8. COPY TO ANOTHER LETTER DIRECTLY
   const handleCopyToLetter = useCallback((targetUnicode: string) => {
@@ -560,7 +571,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
             });
             canvas.add(pathObj);
             canvas.requestRenderAll();
-            syncToStoreDebounced();
+            syncCanvasToStore();
           } catch (e) {
             console.warn('Failed to commit pen path:', e);
           }
@@ -573,15 +584,14 @@ export const CanvasEditor: React.FC = React.memo(() => {
       penDragStartPosRef.current = null;
       renderOverlay();
     },
-    [penMode, strokeColor, strokeWidth, fillColor, strokeCap, strokeJoin, activeTool, renderOverlay, syncToStoreDebounced]
+    [penMode, strokeColor, strokeWidth, fillColor, strokeCap, strokeJoin, activeTool, renderOverlay, syncCanvasToStore]
   );
 
   // Global Keyboard Shortcuts (Ctrl+A, Ctrl+Del, Delete, Backspace, Esc, Enter, Undo, Redo, Tools)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if typing in text inputs or textareas
-      const target = e.target as HTMLElement;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+      // Ignore if typing in text inputs, textareas, selects, or editable elements
+      if (isTypingInInputElement(e)) {
         return;
       }
 
@@ -628,7 +638,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
             activeObjects.forEach((obj) => canvas.remove(obj));
             canvas.discardActiveObject();
             canvas.requestRenderAll();
-            syncToStoreDebounced();
+            syncCanvasToStore();
             useUIStore.getState().setSelectedObjectAngle(null);
             return;
           }
@@ -717,7 +727,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
     nudgeSelectedNodes,
     clearNodeEditing,
     renderOverlay,
-    syncToStoreDebounced,
+    syncCanvasToStore,
   ]);
 
   // Initialize Fabric canvas
@@ -844,11 +854,12 @@ export const CanvasEditor: React.FC = React.memo(() => {
       const pointer =
         opt.scenePoint || (canvas as any).getScenePoint?.(opt.e) || { x: eAny?.offsetX ?? 0, y: eAny?.offsetY ?? 0 };
       // Pan with Space held, Pan tool, or Middle mouse button (never draw or select while panning)
-      if (isSpacePressedRef.current || tool === 'pan' || eAny?.button === 1) {
+      if (isSpacePressedRef.current || isPanningRef.current || tool === 'pan' || eAny?.button === 1) {
         startPan(eAny?.clientX ?? 0, eAny?.clientY ?? 0);
         return;
       }
       isMouseDown = true;
+      isMouseDownRef.current = true;
 
       if (tool === 'direct-select') {
         // 1. Check if hit handle grip
@@ -946,7 +957,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
               canvas.remove(selectedPathObjRef.current);
               clearNodeEditing();
             }
-            syncToStoreDebounced();
+            syncCanvasToStore();
             renderOverlay();
             return;
           }
@@ -960,7 +971,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
             setSelectedNodesCount(1);
             const newPath = rebuildFabricPathFromSubpaths(selectedPathObjRef.current, inserted.subpaths, canvas);
             if (newPath) selectedPathObjRef.current = newPath;
-            syncToStoreDebounced();
+            syncCanvasToStore();
             renderOverlay();
             return;
           }
@@ -995,7 +1006,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
         lastEraserPosRef.current = { x: pointer.x, y: pointer.y };
         const radius = useUIStore.getState().eraserSize / 2;
         if (eraseStrokesAlongSegment(canvas, pointer, pointer, radius)) {
-          syncToStoreDebounced();
+          hasErasedDuringDragRef.current = true;
         }
       }
     });
@@ -1007,7 +1018,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
       const pointer =
         opt.scenePoint || (canvas as any).getScenePoint?.(opt.e) || { x: eAny?.offsetX ?? 0, y: eAny?.offsetY ?? 0 };
 
-      if (isPanning || isSpacePressedRef.current || tool === 'pan') {
+      if (isPanning || isPanningRef.current || isSpacePressedRef.current || tool === 'pan') {
         return;
       }
 
@@ -1217,7 +1228,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
           const radius = useUIStore.getState().eraserSize / 2;
           const prev = lastEraserPosRef.current;
           if (eraseStrokesAlongSegment(canvas, prev, pointer, radius)) {
-            syncToStoreDebounced();
+            hasErasedDuringDragRef.current = true;
           }
           lastEraserPosRef.current = { x: pointer.x, y: pointer.y };
         }
@@ -1228,18 +1239,25 @@ export const CanvasEditor: React.FC = React.memo(() => {
       const tool = useUIStore.getState().activeTool;
       const curPenMode = useUIStore.getState().penMode;
       isMouseDown = false;
+      isMouseDownRef.current = false;
       lastEraserPosRef.current = null;
 
-      if (isPanning || isSpacePressedRef.current || tool === 'pan') {
+      if (isPanning || isPanningRef.current || isSpacePressedRef.current || tool === 'pan') {
         return;
       }
 
       if (tool === 'direct-select') {
         if (activeNodeDragRef.current) {
-          syncToStoreDebounced();
+          syncCanvasToStore();
         }
         activeNodeDragRef.current = null;
         marqueeBoxRef.current = null;
+        renderOverlay();
+      } else if (tool === 'eraser') {
+        if (hasErasedDuringDragRef.current) {
+          hasErasedDuringDragRef.current = false;
+          syncCanvasToStore();
+        }
         renderOverlay();
       } else if (tool === 'pen') {
         if (activeDragIndexRef.current !== null) {
@@ -1257,6 +1275,9 @@ export const CanvasEditor: React.FC = React.memo(() => {
 
     canvas.on('mouse:dblclick', (opt) => {
       const tool = useUIStore.getState().activeTool;
+      if (isPanning || isPanningRef.current || isSpacePressedRef.current || tool === 'pan') {
+        return;
+      }
       const eAny = opt.e as any;
       const pointer =
         opt.scenePoint || (canvas as any).getScenePoint?.(opt.e) || { x: eAny?.offsetX ?? 0, y: eAny?.offsetY ?? 0 };
@@ -1310,7 +1331,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
               if (newPath) selectedPathObjRef.current = newPath;
             }
             canvas.requestRenderAll();
-            syncToStoreDebounced();
+            syncCanvasToStore();
             renderOverlay();
           }
         }
@@ -1376,15 +1397,57 @@ export const CanvasEditor: React.FC = React.memo(() => {
             }
           }
         }
-        syncToStoreDebounced();
+        syncCanvasToStore();
       } else {
-        syncToStoreDebounced();
+        syncCanvasToStore();
       }
     });
+
+    // Global pointerup / mouseup listener to cleanly end drags outside the canvas
+    const handleGlobalWindowPointerUp = () => {
+      if (!isMouseDownRef.current) return;
+      isMouseDown = false;
+      isMouseDownRef.current = false;
+
+      const tool = useUIStore.getState().activeTool;
+      const curPenMode = useUIStore.getState().penMode;
+
+      if (tool === 'direct-select') {
+        if (activeNodeDragRef.current) {
+          syncCanvasToStore();
+        }
+        activeNodeDragRef.current = null;
+        marqueeBoxRef.current = null;
+        renderOverlay();
+      } else if (tool === 'eraser') {
+        if (hasErasedDuringDragRef.current) {
+          hasErasedDuringDragRef.current = false;
+          syncCanvasToStore();
+        }
+        lastEraserPosRef.current = null;
+        renderOverlay();
+      } else if (tool === 'pen') {
+        if (activeDragIndexRef.current !== null) {
+          const idx = activeDragIndexRef.current;
+          const anchor = penNodesRef.current[idx];
+          if (anchor && !anchor.isManual && curPenMode === 'rounded') {
+            autoComputeSmoothCircularHandles(penNodesRef.current, false);
+          }
+        }
+        activeDragIndexRef.current = null;
+        penDragStartPosRef.current = null;
+        renderOverlay();
+      }
+    };
+
+    window.addEventListener('pointerup', handleGlobalWindowPointerUp);
+    window.addEventListener('mouseup', handleGlobalWindowPointerUp);
 
     fabricCanvasRef.current = canvas;
 
     return () => {
+      window.removeEventListener('pointerup', handleGlobalWindowPointerUp);
+      window.removeEventListener('mouseup', handleGlobalWindowPointerUp);
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
       if (upperEl) upperEl.removeEventListener('contextmenu', handleCanvasContextMenu);
       canvas.off('contextmenu', handleFabricContextMenu);
@@ -1541,54 +1604,91 @@ export const CanvasEditor: React.FC = React.memo(() => {
 
   const prevUnicodeRef = useRef<string>(activeUnicode);
 
+  // Listen for project reset / load to avoid stale canvas flushing
+  useEffect(() => {
+    const handleProjectLoaded = () => {
+      prevUnicodeRef.current = useGlyphStore.getState().activeUnicode;
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+      penNodesRef.current = [];
+      const canvas = fabricCanvasRef.current;
+      if (canvas) {
+        canvas.discardActiveObject();
+        clearNodeEditing();
+      }
+    };
+    window.addEventListener('lipi:project-loaded', handleProjectLoaded);
+    return () => window.removeEventListener('lipi:project-loaded', handleProjectLoaded);
+  }, [clearNodeEditing]);
+
   // Rehydrate glyph paths when active character changes
   useEffect(() => {
     const canvas = fabricCanvasRef.current;
     if (!canvas || !currentGlyph) return;
 
+    const isGlyphSwitch = prevUnicodeRef.current !== activeUnicode;
+
     // If switching between different Unicode glyphs, synchronously flush pending strokes for previous glyph first
-    if (prevUnicodeRef.current && prevUnicodeRef.current !== activeUnicode) {
+    if (isGlyphSwitch && prevUnicodeRef.current) {
+      const prevCode = prevUnicodeRef.current;
+
+      // 1. Commit in-progress pen path if >= 2 nodes
+      if (penNodesRef.current.length >= 2) {
+        commitPenPath(false);
+      } else {
+        penNodesRef.current = [];
+      }
+
+      // 2. Discard selection so any active transforms are committed to object attributes
+      canvas.discardActiveObject();
+      clearNodeEditing();
+
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
         debounceTimerRef.current = null;
-        const pendingPaths = serializeCanvasPaths(canvas);
-        const prevCode = prevUnicodeRef.current;
-        const prevGlyph = useGlyphStore.getState().glyphs[prevCode];
-        if (prevGlyph) {
-          useGlyphStore.setState((s) => ({
-            glyphs: {
-              ...s.glyphs,
-              [prevCode]: {
-                ...prevGlyph,
-                paths: cloneVectorPaths(pendingPaths),
-                isEdited: pendingPaths.length > 0,
-                lastModified: Date.now(),
-              },
-            },
-          }));
-        }
       }
+
+      // 3. Serialize and commit to previous glyph's paths AND per-glyph undo history
+      const pendingPaths = serializeCanvasPaths(canvas);
+      useGlyphStore.getState().updateGlyphPaths(prevCode, pendingPaths, true);
     }
     prevUnicodeRef.current = activeUnicode;
 
     // Ignore canvas-initiated updates so strokes are never duplicated or cleared mid-edit
-    if (isInternalUpdateRef.current) {
+    // Only ignore if we are staying on the same glyph!
+    if (!isGlyphSwitch && isInternalUpdateRef.current) {
       isInternalUpdateRef.current = false;
       return;
     }
+    isInternalUpdateRef.current = false;
 
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = null;
     }
 
+    // Reset interactive states cleanly
+    canvas.discardActiveObject();
     clearNodeEditing();
+    penNodesRef.current = [];
+    activeDragIndexRef.current = null;
+    hoverPosRef.current = null;
+    lastEraserPosRef.current = null;
+    marqueeBoxRef.current = null;
+    activeNodeDragRef.current = null;
+    hoveredNodeInfoRef.current = null;
+    hoveredSegmentRef.current = null;
+    isMouseDownRef.current = false;
+    hasErasedDuringDragRef.current = false;
+
     isSyncingRef.current = true;
     canvas.clear();
     canvas.backgroundColor = 'transparent';
-    penNodesRef.current = [];
     renderOverlay();
 
+    let rehydrateFailedCount = 0;
     if (currentGlyph.paths && currentGlyph.paths.length > 0) {
       currentGlyph.paths.forEach((p) => {
         const pathObj = rehydrateFabricPath(p, {
@@ -1597,15 +1697,29 @@ export const CanvasEditor: React.FC = React.memo(() => {
         });
         if (pathObj) {
           canvas.add(pathObj);
+        } else {
+          rehydrateFailedCount++;
         }
       });
     }
 
+    if (rehydrateFailedCount > 0) {
+      useUIStore.getState().showToast(
+        `Warning: ${rehydrateFailedCount} path(s) could not be rendered for ${currentGlyph.character}.`
+      );
+    }
+
     canvas.requestRenderAll();
     isSyncingRef.current = false;
-  }, [activeUnicode, currentGlyph?.paths]);
-
-
+  }, [
+    activeUnicode,
+    currentGlyph,
+    activeTool,
+    strokeColor,
+    commitPenPath,
+    clearNodeEditing,
+    renderOverlay,
+  ]);
 
   // Option to Edit the Reference Font directly (converts reference outline into editable paths)
   const editReferenceFont = useCallback(() => {
@@ -1664,11 +1778,18 @@ export const CanvasEditor: React.FC = React.memo(() => {
       canvas.setActiveObject(pathObj);
       setActiveTool('select');
       canvas.requestRenderAll();
-      syncToStoreDebounced();
+      syncCanvasToStore();
     } catch (err) {
       console.error('Failed to edit reference font:', err);
     }
-  }, [activeUnicode, activeOutlines, guidePositions, strokeColor, setActiveTool, syncToStoreDebounced]);
+  }, [
+    activeUnicode,
+    activeOutlines,
+    guidePositions,
+    strokeColor,
+    setActiveTool,
+    syncCanvasToStore,
+  ]);
 
   // Listen for "Trace to Canvas" dispatched from unified top navigation
   useEffect(() => {
