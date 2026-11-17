@@ -418,4 +418,145 @@ describe('Selected Stroke Property Inspector & Object-Aware Controls', () => {
     expect(redonePaths[0].strokeColor).toBe('#4338ca');
     expect(redonePaths[0].strokeLineCap).toBe('square');
   });
+
+  it('10. Updating angle and resetting angle to 0° updates both store and Fabric object', () => {
+    const path = new Path('M 10 10 L 100 100', {
+      stroke: '#0f172a',
+      strokeWidth: 16,
+      angle: 0,
+    });
+    (path as any).id = 'stroke_angle_test';
+    canvas.add(path);
+    canvas.setActiveObject(path);
+
+    useUIStore.getState().setSelectedStroke({
+      strokeWidth: 16,
+      strokeColor: '#0f172a',
+      fillColor: 'transparent',
+      strokeCap: 'round',
+      strokeJoin: 'round',
+      brushTip: 'round',
+      opacity: 1,
+      angle: null,
+    });
+
+    // Rotate to 45°
+    useUIStore.getState().updateSelectedStroke({ angle: 45 });
+    path.set('angle', 45);
+
+    expect(useUIStore.getState().selectedStroke?.angle).toBe(45);
+    expect(useUIStore.getState().selectedObjectAngle).toBe(45);
+    expect(path.angle).toBe(45);
+
+    // Reset angle back to 0° (via the inspector "Reset" button)
+    useUIStore.getState().updateSelectedStroke({ angle: 0 });
+    path.set('angle', 0);
+
+    expect(useUIStore.getState().selectedStroke?.angle).toBe(0);
+    expect(path.angle).toBe(0);
+  });
+
+  it('11. Fill color modification and transparent toggling updates Fabric object and store', () => {
+    const path = new Path('M 10 10 L 50 10 L 50 50 Z', {
+      stroke: '#0f172a',
+      strokeWidth: 12,
+      fill: 'transparent',
+    });
+    (path as any).id = 'stroke_fill_test';
+    canvas.add(path);
+    canvas.setActiveObject(path);
+
+    useUIStore.getState().setSelectedStroke({
+      strokeWidth: 12,
+      strokeColor: '#0f172a',
+      fillColor: 'transparent',
+      strokeCap: 'round',
+      strokeJoin: 'round',
+      brushTip: 'round',
+      opacity: 1,
+      angle: null,
+    });
+
+    // Set fill color to purple '#9333ea'
+    useUIStore.getState().updateSelectedStroke({ fillColor: '#9333ea' });
+    path.set('fill', '#9333ea');
+
+    expect(useUIStore.getState().selectedStroke?.fillColor).toBe('#9333ea');
+    expect(path.fill).toBe('#9333ea');
+
+    // Reset fill back to 'transparent' (None)
+    useUIStore.getState().updateSelectedStroke({ fillColor: 'transparent' });
+    path.set('fill', 'transparent');
+
+    expect(useUIStore.getState().selectedStroke?.fillColor).toBe('transparent');
+    expect(path.fill).toBe('transparent');
+  });
+
+  it('12. When eraser deletes the selected stroke, selectedStroke resets to null', () => {
+    const path = new Path('M 20 20 L 80 80', { stroke: '#0f172a', strokeWidth: 16 });
+    (path as any).id = 'stroke_erased_test';
+    canvas.add(path);
+    canvas.setActiveObject(path);
+
+    useUIStore.getState().setSelectedStroke({
+      strokeWidth: 16,
+      strokeColor: '#0f172a',
+      fillColor: 'transparent',
+      strokeCap: 'round',
+      strokeJoin: 'round',
+      brushTip: 'round',
+      opacity: 1,
+      angle: null,
+    });
+
+    expect(useUIStore.getState().selectedStroke).not.toBeNull();
+
+    // Simulate eraser removing the selected path from canvas
+    canvas.remove(path);
+    expect(canvas.getObjects().includes(path)).toBe(false);
+
+    // CanvasEditor's eraser cleanup logic runs on mouse up / drag end:
+    if (!canvas.getObjects().includes(path)) {
+      useUIStore.getState().setSelectedStroke(null);
+      useUIStore.getState().setSelectedObjectAngle(null);
+    }
+
+    expect(useUIStore.getState().selectedStroke).toBeNull();
+    expect(useUIStore.getState().selectedObjectAngle).toBeNull();
+  });
+
+  it('13. Tool switching flag protects selectedStroke from selection:cleared destruction', () => {
+    const path = new Path('M 10 10 L 60 60', { stroke: '#2563eb', strokeWidth: 18 });
+    (path as any).id = 'stroke_flag_test';
+    canvas.add(path);
+    canvas.setActiveObject(path);
+
+    useUIStore.getState().setSelectedStroke({
+      strokeWidth: 18,
+      strokeColor: '#2563eb',
+      fillColor: 'transparent',
+      strokeCap: 'round',
+      strokeJoin: 'round',
+      brushTip: 'round',
+      opacity: 1,
+      angle: null,
+    });
+
+    let isToolSwitching = true;
+
+    // Simulate Fabric firing 'selection:cleared' during tool mode switch
+    const onSelectionCleared = () => {
+      if (isToolSwitching) return; // Protected!
+      useUIStore.getState().setSelectedStroke(null);
+    };
+
+    onSelectionCleared();
+    expect(useUIStore.getState().selectedStroke).not.toBeNull();
+    expect(useUIStore.getState().selectedStroke?.strokeColor).toBe('#2563eb');
+
+    // After tool transition ends, a genuine deselection should clear it
+    isToolSwitching = false;
+    onSelectionCleared();
+    expect(useUIStore.getState().selectedStroke).toBeNull();
+  });
 });

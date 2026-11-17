@@ -270,5 +270,48 @@ describe('Complete Kannada Font Workflow', () => {
       expect(state.components.some((c) => c.id === 'custom_kombu')).toBe(true);
       expect(state.isDirty).toBe(false);
     });
+
+    it('tracks isDirty state across drawing, resetting, and loading', () => {
+      const store = useGlyphStore.getState();
+      expect(store.isDirty).toBe(false);
+
+      // Drawing a stroke sets isDirty to true
+      store.updateGlyphPaths('U+0C85', [{ pathString: 'M 10 10 L 100 100', strokeWidth: 16 }]);
+      expect(useGlyphStore.getState().isDirty).toBe(true);
+
+      // Resetting project clears isDirty
+      store.resetProject('Fresh-Font');
+      expect(useGlyphStore.getState().isDirty).toBe(false);
+
+      // Drawing again
+      useGlyphStore.getState().updateGlyphPaths('U+0C86', [{ pathString: 'M 20 20 L 80 80', strokeWidth: 16 }]);
+      expect(useGlyphStore.getState().isDirty).toBe(true);
+
+      // Saving / loading clean project clears isDirty
+      const cleanProject = {
+        format: 'LIPI_PROJECT',
+        schemaVersion: '2.0.0',
+        metadata: store.metadata,
+        glyphs: {},
+      };
+      useGlyphStore.getState().loadLipiFileContent(JSON.stringify(cleanProject));
+      expect(useGlyphStore.getState().isDirty).toBe(false);
+    });
+
+    it('distinguishes between 0 custom glyphs (fallback warning) and active custom glyphs', () => {
+      const store = useGlyphStore.getState();
+      const getEditedCount = () => Object.values(useGlyphStore.getState().glyphs).filter((g) => g.paths.length > 0).length;
+
+      // Initially 0 custom glyphs drawn
+      expect(getEditedCount()).toBe(0);
+
+      // Add stroke to 'ಕ' (U+0C95)
+      store.updateGlyphPaths('U+0C95', [{ pathString: 'M 50 50 L 150 150', strokeWidth: 20 }]);
+      expect(getEditedCount()).toBe(1);
+
+      // Add stroke to 'ಖ' (U+0C96)
+      store.updateGlyphPaths('U+0C96', [{ pathString: 'M 60 60 L 160 160', strokeWidth: 20 }]);
+      expect(getEditedCount()).toBe(2);
+    });
   });
 });

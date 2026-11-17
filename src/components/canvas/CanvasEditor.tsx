@@ -73,6 +73,13 @@ function extractSelectedStrokeProperties(obj: Path): SelectedStrokeProperties {
   };
 }
 
+function ensurePathId(pathObj: any): string {
+  if (!pathObj.id) {
+    pathObj.id = `path-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  }
+  return pathObj.id;
+}
+
 export const CanvasEditor: React.FC = React.memo(() => {
   const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
   const guideCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -98,6 +105,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
   // Direct selection & Node-level editing interactive state refs
   const selectedPathObjRef = useRef<Path | null>(null);
   const selectedPathIdRef = useRef<string | null>(null);
+  const isToolSwitchingRef = useRef<boolean>(false);
   const editableSubpathsRef = useRef<EditableSubpath[]>([]);
   const selectedNodeIdsRef = useRef<Set<string>>(new Set());
   const activeNodeDragRef = useRef<{
@@ -265,9 +273,10 @@ export const CanvasEditor: React.FC = React.memo(() => {
   const loadPathForNodeEditing = useCallback(
     (pathObj: Path) => {
       if (!pathObj || !(pathObj as any).path) return;
+      ensurePathId(pathObj);
       const subs = fabricPathToEditableSubpaths(pathObj);
       selectedPathObjRef.current = pathObj;
-      selectedPathIdRef.current = (pathObj as any).id || null;
+      selectedPathIdRef.current = (pathObj as any).id;
       editableSubpathsRef.current = subs;
       selectedNodeIdsRef.current.clear();
       setHasActivePath(true);
@@ -610,6 +619,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
               selectable: activeTool === 'select',
               evented: true,
             });
+            ensurePathId(pathObj);
             canvas.add(pathObj);
             canvas.requestRenderAll();
             if (syncToStore) {
@@ -848,7 +858,9 @@ export const CanvasEditor: React.FC = React.memo(() => {
       updateAngle();
       const obj = opt.selected?.[0] || canvas.getActiveObject();
       if (obj && obj instanceof Path) {
-        selectedPathIdRef.current = (obj as any).id || null;
+        ensurePathId(obj);
+        selectedPathIdRef.current = (obj as any).id;
+        selectedPathObjRef.current = obj;
         const strokeProps = extractSelectedStrokeProperties(obj);
         useUIStore.getState().setSelectedStroke(strokeProps);
         useUIStore.getState().setSelectedObjectAngle(strokeProps.angle);
@@ -909,7 +921,9 @@ export const CanvasEditor: React.FC = React.memo(() => {
     canvas.on('selection:created', onSelectionChanged);
     canvas.on('selection:updated', onSelectionChanged);
     canvas.on('selection:cleared', () => {
+      if (isToolSwitchingRef.current) return;
       selectedPathIdRef.current = null;
+      selectedPathObjRef.current = null;
       useUIStore.getState().setSelectedStroke(null);
       useUIStore.getState().setSelectedObjectAngle(null);
     });
@@ -1329,6 +1343,12 @@ export const CanvasEditor: React.FC = React.memo(() => {
       } else if (tool === 'eraser') {
         if (hasErasedDuringDragRef.current) {
           hasErasedDuringDragRef.current = false;
+          if (selectedPathObjRef.current && !canvas.getObjects().includes(selectedPathObjRef.current)) {
+            selectedPathObjRef.current = null;
+            selectedPathIdRef.current = null;
+            useUIStore.getState().setSelectedStroke(null);
+            useUIStore.getState().setSelectedObjectAngle(null);
+          }
           syncCanvasToStore();
         }
         renderOverlay();
@@ -1445,6 +1465,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
                 selectable: true,
                 evented: true,
               });
+              ensurePathId(ribbonObj);
               canvas.add(ribbonObj);
               canvas.requestRenderAll();
             }
@@ -1466,6 +1487,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
                 selectable: true,
                 evented: true,
               });
+              ensurePathId(smoothedObj);
               canvas.add(smoothedObj);
               canvas.requestRenderAll();
             }
@@ -1473,6 +1495,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
         }
         syncCanvasToStore();
       } else {
+        ensurePathId(rawPath);
         syncCanvasToStore();
       }
     });
@@ -1501,6 +1524,12 @@ export const CanvasEditor: React.FC = React.memo(() => {
         } else if (tool === 'eraser') {
           if (hasErasedDuringDragRef.current) {
             hasErasedDuringDragRef.current = false;
+            if (selectedPathObjRef.current && !canvas.getObjects().includes(selectedPathObjRef.current)) {
+              selectedPathObjRef.current = null;
+              selectedPathIdRef.current = null;
+              useUIStore.getState().setSelectedStroke(null);
+              useUIStore.getState().setSelectedObjectAngle(null);
+            }
             syncCanvasToStore();
           }
         } else if (tool === 'pen') {
@@ -1572,67 +1601,98 @@ export const CanvasEditor: React.FC = React.memo(() => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
 
-    // 1. Commit in-progress pen stroke if switching away from pen
-    if (activeTool !== 'pen' && penNodesRef.current.length > 0) {
-      commitPenPath(false);
-    }
-
-    // 2. Commit in-progress brush stroke if switching away from brush
-    if (activeTool !== 'brush' && hasActiveBrushStroke(canvas)) {
-      const res = finalizeBrushStroke(canvas);
-      if (res.committed) {
-        syncCanvasToStore();
+    isToolSwitchingRef.current = true;
+    try {
+      // 1. Commit in-progress pen stroke if switching away from pen
+      if (activeTool !== 'pen' && penNodesRef.current.length > 0) {
+        commitPenPath(false);
       }
-    }
 
-    // 3. Clear active transform, selection, mouse gesture, and drag refs
-    if ((canvas as any)._currentTransform) {
-      try {
-        const evt = typeof MouseEvent !== 'undefined' ? new MouseEvent('mouseup') : ({ type: 'mouseup' } as any);
-        (canvas as any)._onMouseUp?.(evt);
-      } catch {}
-      (canvas as any)._currentTransform = null;
-      syncCanvasToStore();
-    }
-
-    if (isMouseDownRef.current) {
-      if (activeNodeDragRef.current) syncCanvasToStore();
-      if (hasErasedDuringDragRef.current) syncCanvasToStore();
-      isMouseDownRef.current = false;
-    }
-    activeNodeDragRef.current = null;
-    marqueeBoxRef.current = null;
-    lastEraserPosRef.current = null;
-    hasErasedDuringDragRef.current = false;
-
-    // 4. Centralized Interaction Mode Application
-    applyCanvasInteractionMode(canvas, {
-      activeTool,
-      isSpaceHeld,
-      isPanning,
-      strokeWidth,
-      strokeColor,
-      strokeCap,
-      strokeJoin,
-      smoothing,
-    });
-
-    if (activeTool === 'direct-select') {
-      const activeObj = canvas.getActiveObject();
-      if (activeObj && activeObj instanceof Path && (activeObj as any).path) {
-        loadPathForNodeEditing(activeObj);
-      } else if (!selectedPathObjRef.current) {
-        const objs = canvas.getObjects();
-        const p = objs.find((o) => o instanceof Path && (o as any).path) as Path | undefined;
-        if (p) {
-          loadPathForNodeEditing(p);
+      // 2. Commit in-progress brush stroke if switching away from brush
+      if (activeTool !== 'brush' && hasActiveBrushStroke(canvas)) {
+        const res = finalizeBrushStroke(canvas);
+        if (res.committed) {
+          syncCanvasToStore();
         }
       }
-    } else {
-      clearNodeEditing();
-    }
 
-    renderOverlay();
+      // 3. Clear active transform, selection, mouse gesture, and drag refs
+      if ((canvas as any)._currentTransform) {
+        try {
+          const evt = typeof MouseEvent !== 'undefined' ? new MouseEvent('mouseup') : ({ type: 'mouseup' } as any);
+          (canvas as any)._onMouseUp?.(evt);
+        } catch {}
+        (canvas as any)._currentTransform = null;
+        syncCanvasToStore();
+      }
+
+      if (isMouseDownRef.current) {
+        if (activeNodeDragRef.current) syncCanvasToStore();
+        if (hasErasedDuringDragRef.current) {
+          if (selectedPathObjRef.current && !canvas.getObjects().includes(selectedPathObjRef.current)) {
+            selectedPathObjRef.current = null;
+            selectedPathIdRef.current = null;
+            useUIStore.getState().setSelectedStroke(null);
+            useUIStore.getState().setSelectedObjectAngle(null);
+          }
+          syncCanvasToStore();
+        }
+        isMouseDownRef.current = false;
+      }
+      activeNodeDragRef.current = null;
+      marqueeBoxRef.current = null;
+      lastEraserPosRef.current = null;
+      hasErasedDuringDragRef.current = false;
+
+      // 4. Centralized Interaction Mode Application
+      applyCanvasInteractionMode(canvas, {
+        activeTool,
+        isSpaceHeld,
+        isPanning,
+        strokeWidth,
+        strokeColor,
+        strokeCap,
+        strokeJoin,
+        smoothing,
+      });
+
+      // Find currently selected path object if one exists
+      const targetObj =
+        canvas.getActiveObject() ||
+        selectedPathObjRef.current ||
+        (selectedPathIdRef.current
+          ? (canvas.getObjects() as any[]).find((o) => (o as any).id === selectedPathIdRef.current)
+          : null);
+
+      if (targetObj && targetObj instanceof Path && canvas.getObjects().includes(targetObj)) {
+        selectedPathObjRef.current = targetObj;
+        selectedPathIdRef.current = (targetObj as any).id || null;
+
+        if (activeTool === 'direct-select') {
+          loadPathForNodeEditing(targetObj);
+        } else {
+          // Clear node editing handles/subpaths without losing selected stroke reference
+          editableSubpathsRef.current = [];
+          selectedNodeIdsRef.current.clear();
+          setHasActivePath(false);
+          setSelectedNodesCount(0);
+          setActiveNodeCoords(null);
+
+          if (activeTool === 'select') {
+            canvas.setActiveObject(targetObj);
+          }
+          const strokeProps = extractSelectedStrokeProperties(targetObj);
+          useUIStore.getState().setSelectedStroke(strokeProps);
+          useUIStore.getState().setSelectedObjectAngle(strokeProps.angle);
+        }
+      } else {
+        clearNodeEditing();
+      }
+
+      renderOverlay();
+    } finally {
+      isToolSwitchingRef.current = false;
+    }
   }, [
     activeTool,
     brushTip,
@@ -1659,7 +1719,10 @@ export const CanvasEditor: React.FC = React.memo(() => {
       if (!canvas) return;
 
       const activeObjs = canvas.getActiveObjects();
-      const targetObj = activeObjs[0] || selectedPathObjRef.current;
+      let targetObj = activeObjs[0] || selectedPathObjRef.current;
+      if (!targetObj && selectedPathIdRef.current) {
+        targetObj = (canvas.getObjects() as any[]).find((o) => (o as any).id === selectedPathIdRef.current);
+      }
       if (!targetObj || !(targetObj instanceof Path)) return;
 
       let modified = false;
@@ -1675,7 +1738,11 @@ export const CanvasEditor: React.FC = React.memo(() => {
             modified = true;
           }
           if (patch.fillColor !== undefined) {
-            obj.set('fill', patch.fillColor === 'transparent' ? undefined : patch.fillColor);
+            const nextFill =
+              !patch.fillColor || patch.fillColor === 'transparent' || patch.fillColor === 'none'
+                ? 'transparent'
+                : patch.fillColor;
+            obj.set('fill', nextFill);
             modified = true;
           }
           if (patch.strokeCap !== undefined) {
@@ -1694,11 +1761,18 @@ export const CanvasEditor: React.FC = React.memo(() => {
             (obj as any).brushTip = patch.brushTip;
             modified = true;
           }
+          if (patch.angle !== undefined) {
+            obj.set('angle', patch.angle ?? 0);
+            modified = true;
+          }
           (obj as any).setCoords?.();
         }
       });
 
       if (modified) {
+        const updatedProps = extractSelectedStrokeProperties(targetObj as Path);
+        useUIStore.getState().setSelectedStroke(updatedProps);
+        useUIStore.getState().setSelectedObjectAngle(updatedProps.angle);
         canvas.requestRenderAll();
         renderOverlay();
         syncCanvasToStore(true);
@@ -1713,6 +1787,8 @@ export const CanvasEditor: React.FC = React.memo(() => {
         canvas.requestRenderAll();
         renderOverlay();
       }
+      selectedPathIdRef.current = null;
+      selectedPathObjRef.current = null;
       useUIStore.getState().setSelectedStroke(null);
       useUIStore.getState().setSelectedObjectAngle(null);
     };
@@ -1761,6 +1837,9 @@ export const CanvasEditor: React.FC = React.memo(() => {
         }
         canvas.discardActiveObject();
         clearNodeEditing();
+        selectedPathIdRef.current = null;
+        selectedPathObjRef.current = null;
+        useUIStore.getState().setSelectedStroke(null);
         useUIStore.getState().setSelectedObjectAngle(null);
       }
     };
@@ -1782,6 +1861,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
       prevUnicodeRef.current = activeUnicode;
       lastFlushedUnicodeRef.current = activeUnicode;
       selectedPathIdRef.current = null;
+      selectedPathObjRef.current = null;
       cancelBrushStroke(canvas);
       if ((canvas as any)._currentTransform) {
         (canvas as any)._currentTransform = null;
@@ -1793,6 +1873,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
     } else if (isGlyphSwitch && prevUnicodeRef.current) {
       // If switching between different Unicode glyphs, synchronously flush pending strokes for previous glyph first (safety fallback)
       selectedPathIdRef.current = null;
+      selectedPathObjRef.current = null;
       useUIStore.getState().setSelectedStroke(null);
       useUIStore.getState().setSelectedObjectAngle(null);
       if (lastFlushedUnicodeRef.current !== prevUnicodeRef.current) {
@@ -1855,6 +1936,8 @@ export const CanvasEditor: React.FC = React.memo(() => {
     }
 
     if (matchedPathObj && !isGlyphSwitch && !isProjectResetOrLoaded) {
+      selectedPathObjRef.current = matchedPathObj;
+      selectedPathIdRef.current = (matchedPathObj as any).id || null;
       canvas.setActiveObject(matchedPathObj);
       if (activeTool === 'direct-select') {
         loadPathForNodeEditing(matchedPathObj);
@@ -1865,6 +1948,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
       }
     } else {
       selectedPathIdRef.current = null;
+      selectedPathObjRef.current = null;
       useUIStore.getState().setSelectedStroke(null);
       useUIStore.getState().setSelectedObjectAngle(null);
     }

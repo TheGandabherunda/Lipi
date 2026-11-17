@@ -446,9 +446,21 @@ export const FontPreviewModal: React.FC<FontPreviewModalProps> = ({ isOpen, onCl
         </div>
 
         {/* Informational Sub-banner: Custom Drawn vs Reference Font */}
-        <div className="px-6 py-1.5 bg-indigo-50/50 border-b border-indigo-100/80 flex items-center justify-between text-xs text-indigo-900 shrink-0">
+        <div
+          data-testid="preview-fallback-banner"
+          className={clsx(
+            'px-6 py-1.5 border-b flex items-center justify-between text-xs shrink-0',
+            editedCount > 0
+              ? 'bg-indigo-50/50 border-indigo-100/80 text-indigo-900'
+              : 'bg-amber-50 border-amber-200/90 text-amber-900'
+          )}
+        >
           <div className="flex items-center gap-2">
-            <Sparkles className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+            {editedCount > 0 ? (
+              <Sparkles className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+            ) : (
+              <span className="text-amber-600 font-bold shrink-0">⚠️</span>
+            )}
             <span>
               {editedCount > 0 ? (
                 <>
@@ -456,12 +468,17 @@ export const FontPreviewModal: React.FC<FontPreviewModalProps> = ({ isOpen, onCl
                 </>
               ) : (
                 <>
-                  No custom glyphs drawn yet. Previewing with reference font (<strong>{selectedFontDef.name}</strong>). Draw letters on canvas to see custom curves here!
+                  Preview using fallback font (<strong>{selectedFontDef.name}</strong>): No custom glyphs drawn yet. Draw letters on canvas to see your custom typeface here!
                 </>
               )}
             </span>
           </div>
-          <span className="text-[11px] text-indigo-700 font-semibold hidden md:inline">
+          <span
+            className={clsx(
+              'text-[11px] font-semibold hidden md:inline',
+              editedCount > 0 ? 'text-indigo-700' : 'text-amber-700'
+            )}
+          >
             Kannada Complex Text Layout (CTL): Enabled
           </span>
         </div>

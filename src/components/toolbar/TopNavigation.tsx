@@ -12,6 +12,7 @@ import {
   Type,
   Settings2,
   RotateCw,
+  RotateCcw,
   BookOpen,
   Wand2,
   Keyboard,
@@ -38,6 +39,7 @@ export const TopNavigation: React.FC<TopNavigationProps> = ({ onOpenPreview }) =
   const updateMetadata = useGlyphStore((s) => s.updateMetadata);
   const downloadLipiFile = useGlyphStore((s) => s.downloadLipiFile);
   const loadLipiFileContent = useGlyphStore((s) => s.loadLipiFileContent);
+  const resetProject = useGlyphStore((s) => s.resetProject);
   const activeUnicode = useGlyphStore((s) => s.activeUnicode);
   const isDirty = useGlyphStore((s) => s.isDirty);
   const components = useGlyphStore((s) => s.components);
@@ -71,6 +73,20 @@ export const TopNavigation: React.FC<TopNavigationProps> = ({ onOpenPreview }) =
     };
   }, [isOptionsOpen]);
 
+  // Warn before closing or reloading if unsaved changes exist
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isDirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isDirty]);
+
   // Handle importing a custom font file (.ttf, .otf, .woff)
   const handleUserFontFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -102,6 +118,16 @@ export const TopNavigation: React.FC<TopNavigationProps> = ({ onOpenPreview }) =
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (isDirty) {
+      const confirmDiscard = window.confirm(
+        'You have unsaved changes in this project. Loading a new project will overwrite your work. Continue?'
+      );
+      if (!confirmDiscard) {
+        e.target.value = '';
+        return;
+      }
+    }
+
     const reader = new FileReader();
     reader.onload = (event) => {
       const content = event.target?.result as string;
@@ -109,6 +135,8 @@ export const TopNavigation: React.FC<TopNavigationProps> = ({ onOpenPreview }) =
         const result = loadLipiFileContent(content);
         if (!result.success) {
           alert(`Error loading file: ${result.error}`);
+        } else {
+          useUIStore.getState().setSelectedStroke(null);
         }
       }
     };
@@ -379,6 +407,25 @@ export const TopNavigation: React.FC<TopNavigationProps> = ({ onOpenPreview }) =
 
               {/* Project Actions */}
               <div className="flex flex-col gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isDirty) {
+                      const confirmReset = window.confirm(
+                        'You have unsaved changes. Resetting will clear all drawn glyphs and start a new project. Continue?'
+                      );
+                      if (!confirmReset) return;
+                    }
+                    resetProject();
+                    useUIStore.getState().setSelectedStroke(null);
+                    setIsOptionsOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer text-left"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                  <span>New / Reset Project</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => {
