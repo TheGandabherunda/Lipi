@@ -30,3 +30,14 @@ export interface ViewportTransform {
   panX: number;
   panY: number;
 }
+
+export interface SelectedStrokeProperties {
+  strokeWidth: number;
+  strokeColor: string;
+  fillColor: string;
+  strokeCap: StrokeCap;
+  strokeJoin: StrokeJoin;
+  brushTip: BrushTip;
+  opacity: number;
+  angle: number | null;
+}

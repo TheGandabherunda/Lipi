@@ -193,10 +193,11 @@ describe('Canvas Interaction Mode Centralization', () => {
       isPanning: false,
     });
 
-    // Now enters brush mode
+    // Now enters brush mode while preserving the selected object
     expect(canvas.isDrawingMode).toBe(true);
     expect(canvas.defaultCursor).toBe('none');
-    expect(canvas.activeObject).toBeNull();
+    expect(canvas.activeObject).toBe(obj1);
+    expect(obj1.selectable).toBe(false);
   });
 
   it('clears canvas._currentTransform when Space pan activates to prevent dragged transform mutation', () => {

@@ -24,10 +24,14 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      // Close shortcuts modal on Escape if open
-      if (e.key === 'Escape' && useUIStore.getState().isShortcutsModalOpen) {
+      // Close shortcuts modal on Escape if open, or deselect stroke
+      if (e.key === 'Escape') {
         e.preventDefault();
-        useUIStore.getState().setShortcutsModalOpen(false);
+        if (useUIStore.getState().isShortcutsModalOpen) {
+          useUIStore.getState().setShortcutsModalOpen(false);
+        } else {
+          useUIStore.getState().deselectStroke();
+        }
         return;
       }
 
@@ -126,11 +130,21 @@ export function useKeyboardShortcuts() {
 
       // Stroke width adjustments: [ and ]
       if (e.key === '[') {
-        const current = useUIStore.getState().strokeWidth;
-        useUIStore.getState().setStrokeWidth(Math.max(2, current - 2));
+        const sel = useUIStore.getState().selectedStroke;
+        if (sel) {
+          useUIStore.getState().updateSelectedStroke({ strokeWidth: Math.max(2, sel.strokeWidth - 2) });
+        } else {
+          const current = useUIStore.getState().strokeWidth;
+          useUIStore.getState().setStrokeWidth(Math.max(2, current - 2));
+        }
       } else if (e.key === ']') {
-        const current = useUIStore.getState().strokeWidth;
-        useUIStore.getState().setStrokeWidth(Math.min(64, current + 2));
+        const sel = useUIStore.getState().selectedStroke;
+        if (sel) {
+          useUIStore.getState().updateSelectedStroke({ strokeWidth: Math.min(64, sel.strokeWidth + 2) });
+        } else {
+          const current = useUIStore.getState().strokeWidth;
+          useUIStore.getState().setStrokeWidth(Math.min(64, current + 2));
+        }
       }
     };
 

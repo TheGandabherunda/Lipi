@@ -47,6 +47,31 @@ import { cancelBrushStroke, finalizeBrushStroke, hasActiveBrushStroke } from './
 import { applyCanvasInteractionMode } from './utils/canvasInteractionMode';
 import { flushEditorCanvasToGlyph } from './utils/canvasFlusher';
 import { isTypingInInputElement } from '../../utils/keyboardUtils';
+import type { SelectedStrokeProperties, StrokeCap, StrokeJoin, BrushTip } from '../../types/canvas';
+
+function extractSelectedStrokeProperties(obj: Path): SelectedStrokeProperties {
+  const rawAngle = obj.angle || 0;
+  const normalized = ((rawAngle % 360) + 360) % 360;
+  const angle = Math.round(normalized * 10) / 10;
+  const strokeWidth = Number(obj.strokeWidth ?? 16);
+  const strokeColor = typeof obj.stroke === 'string' && obj.stroke ? obj.stroke : '#0f172a';
+  const fillColor = typeof obj.fill === 'string' && obj.fill && obj.fill !== 'none' ? obj.fill : 'transparent';
+  const strokeCap = (obj.strokeLineCap as StrokeCap) || 'round';
+  const strokeJoin = (obj.strokeLineJoin as StrokeJoin) || 'round';
+  const opacity = typeof obj.opacity === 'number' ? Math.round(obj.opacity * 100) / 100 : 1;
+  const brushTip = ((obj as any).brushTip as BrushTip) || (fillColor !== 'transparent' && !obj.stroke ? 'calligraphy' : 'round');
+
+  return {
+    strokeWidth,
+    strokeColor,
+    fillColor,
+    strokeCap,
+    strokeJoin,
+    brushTip,
+    opacity,
+    angle: angle === 0 ? null : angle,
+  };
+}
 
 export const CanvasEditor: React.FC = React.memo(() => {
   const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
@@ -72,6 +97,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
 
   // Direct selection & Node-level editing interactive state refs
   const selectedPathObjRef = useRef<Path | null>(null);
+  const selectedPathIdRef = useRef<string | null>(null);
   const editableSubpathsRef = useRef<EditableSubpath[]>([]);
   const selectedNodeIdsRef = useRef<Set<string>>(new Set());
   const activeNodeDragRef = useRef<{
@@ -241,17 +267,18 @@ export const CanvasEditor: React.FC = React.memo(() => {
       if (!pathObj || !(pathObj as any).path) return;
       const subs = fabricPathToEditableSubpaths(pathObj);
       selectedPathObjRef.current = pathObj;
+      selectedPathIdRef.current = (pathObj as any).id || null;
       editableSubpathsRef.current = subs;
       selectedNodeIdsRef.current.clear();
       setHasActivePath(true);
       setSelectedNodesCount(0);
       setActiveNodeCoords(null);
-      if (pathObj.strokeWidth !== undefined) {
-        useUIStore.getState().setStrokeWidth(pathObj.strokeWidth as number);
-      }
-      if (pathObj.stroke && typeof pathObj.stroke === 'string') {
-        useUIStore.getState().setStrokeColor(pathObj.stroke);
-      }
+
+      // Populate selectedStroke properties for the inspector
+      const strokeProps = extractSelectedStrokeProperties(pathObj);
+      useUIStore.getState().setSelectedStroke(strokeProps);
+      useUIStore.getState().setSelectedObjectAngle(strokeProps.angle);
+
       renderOverlay();
     },
     [renderOverlay]
@@ -821,12 +848,10 @@ export const CanvasEditor: React.FC = React.memo(() => {
       updateAngle();
       const obj = opt.selected?.[0] || canvas.getActiveObject();
       if (obj && obj instanceof Path) {
-        if (obj.strokeWidth !== undefined) {
-          useUIStore.getState().setStrokeWidth(obj.strokeWidth as number);
-        }
-        if (obj.stroke && typeof obj.stroke === 'string') {
-          useUIStore.getState().setStrokeColor(obj.stroke);
-        }
+        selectedPathIdRef.current = (obj as any).id || null;
+        const strokeProps = extractSelectedStrokeProperties(obj);
+        useUIStore.getState().setSelectedStroke(strokeProps);
+        useUIStore.getState().setSelectedObjectAngle(strokeProps.angle);
       }
     };
 
@@ -884,6 +909,8 @@ export const CanvasEditor: React.FC = React.memo(() => {
     canvas.on('selection:created', onSelectionChanged);
     canvas.on('selection:updated', onSelectionChanged);
     canvas.on('selection:cleared', () => {
+      selectedPathIdRef.current = null;
+      useUIStore.getState().setSelectedStroke(null);
       useUIStore.getState().setSelectedObjectAngle(null);
     });
     canvas.on('object:rotating', updateAngle);
@@ -1568,11 +1595,6 @@ export const CanvasEditor: React.FC = React.memo(() => {
       syncCanvasToStore();
     }
 
-    if (activeTool !== 'select') {
-      canvas.discardActiveObject();
-      useUIStore.getState().setSelectedObjectAngle(null);
-    }
-
     if (isMouseDownRef.current) {
       if (activeNodeDragRef.current) syncCanvasToStore();
       if (hasErasedDuringDragRef.current) syncCanvasToStore();
@@ -1596,7 +1618,10 @@ export const CanvasEditor: React.FC = React.memo(() => {
     });
 
     if (activeTool === 'direct-select') {
-      if (!selectedPathObjRef.current) {
+      const activeObj = canvas.getActiveObject();
+      if (activeObj && activeObj instanceof Path && (activeObj as any).path) {
+        loadPathForNodeEditing(activeObj);
+      } else if (!selectedPathObjRef.current) {
         const objs = canvas.getObjects();
         const p = objs.find((o) => o instanceof Path && (o as any).path) as Path | undefined;
         if (p) {
@@ -1625,39 +1650,80 @@ export const CanvasEditor: React.FC = React.memo(() => {
     syncCanvasToStore,
   ]);
 
-  // Live update selected object(s) when stroke attributes change
+  // Listen for selected stroke property updates from the inspector or toolbars
   useEffect(() => {
-    const canvas = fabricCanvasRef.current;
-    if (!canvas || isSyncingRef.current) return;
+    const handleUpdateStroke = (e: Event) => {
+      const patch = (e as CustomEvent).detail as Partial<SelectedStrokeProperties>;
+      if (!patch) return;
+      const canvas = fabricCanvasRef.current;
+      if (!canvas) return;
 
-    let hasModified = false;
-    if (activeTool === 'select') {
       const activeObjs = canvas.getActiveObjects();
-      activeObjs.forEach((obj) => {
+      const targetObj = activeObjs[0] || selectedPathObjRef.current;
+      if (!targetObj || !(targetObj instanceof Path)) return;
+
+      let modified = false;
+      const objsToUpdate = activeObjs.length > 0 ? activeObjs : [targetObj];
+      objsToUpdate.forEach((obj) => {
         if (obj instanceof Path) {
-          obj.set('strokeWidth', strokeWidth);
-          obj.set('stroke', strokeColor);
-          obj.set('strokeLineCap', strokeCap);
-          obj.set('strokeLineJoin', strokeJoin);
+          if (patch.strokeWidth !== undefined) {
+            obj.set('strokeWidth', patch.strokeWidth);
+            modified = true;
+          }
+          if (patch.strokeColor !== undefined) {
+            obj.set('stroke', patch.strokeColor);
+            modified = true;
+          }
+          if (patch.fillColor !== undefined) {
+            obj.set('fill', patch.fillColor === 'transparent' ? undefined : patch.fillColor);
+            modified = true;
+          }
+          if (patch.strokeCap !== undefined) {
+            obj.set('strokeLineCap', patch.strokeCap);
+            modified = true;
+          }
+          if (patch.strokeJoin !== undefined) {
+            obj.set('strokeLineJoin', patch.strokeJoin);
+            modified = true;
+          }
+          if (patch.opacity !== undefined) {
+            obj.set('opacity', patch.opacity);
+            modified = true;
+          }
+          if (patch.brushTip !== undefined) {
+            (obj as any).brushTip = patch.brushTip;
+            modified = true;
+          }
           (obj as any).setCoords?.();
-          hasModified = true;
         }
       });
-    } else if (activeTool === 'direct-select' && selectedPathObjRef.current) {
-      const p = selectedPathObjRef.current;
-      p.set('strokeWidth', strokeWidth);
-      p.set('stroke', strokeColor);
-      p.set('strokeLineCap', strokeCap);
-      p.set('strokeLineJoin', strokeJoin);
-      (p as any).setCoords?.();
-      hasModified = true;
-    }
 
-    if (hasModified) {
-      canvas.requestRenderAll();
-      syncToStoreDebounced();
-    }
-  }, [strokeWidth, strokeColor, strokeCap, strokeJoin, activeTool, syncToStoreDebounced]);
+      if (modified) {
+        canvas.requestRenderAll();
+        renderOverlay();
+        syncCanvasToStore(true);
+      }
+    };
+
+    const handleDeselect = () => {
+      const canvas = fabricCanvasRef.current;
+      if (canvas) {
+        canvas.discardActiveObject();
+        clearNodeEditing();
+        canvas.requestRenderAll();
+        renderOverlay();
+      }
+      useUIStore.getState().setSelectedStroke(null);
+      useUIStore.getState().setSelectedObjectAngle(null);
+    };
+
+    window.addEventListener('lipi:update-selected-stroke', handleUpdateStroke);
+    window.addEventListener('lipi:deselect-stroke', handleDeselect);
+    return () => {
+      window.removeEventListener('lipi:update-selected-stroke', handleUpdateStroke);
+      window.removeEventListener('lipi:deselect-stroke', handleDeselect);
+    };
+  }, [clearNodeEditing, renderOverlay, syncCanvasToStore]);
 
   const prevUnicodeRef = useRef<string>(activeUnicode);
   const lastProjectRevisionRef = useRef<number>(projectRevision);
@@ -1715,15 +1781,20 @@ export const CanvasEditor: React.FC = React.memo(() => {
     if (isProjectResetOrLoaded) {
       prevUnicodeRef.current = activeUnicode;
       lastFlushedUnicodeRef.current = activeUnicode;
+      selectedPathIdRef.current = null;
       cancelBrushStroke(canvas);
       if ((canvas as any)._currentTransform) {
         (canvas as any)._currentTransform = null;
       }
       canvas.discardActiveObject();
       clearNodeEditing();
+      useUIStore.getState().setSelectedStroke(null);
       useUIStore.getState().setSelectedObjectAngle(null);
     } else if (isGlyphSwitch && prevUnicodeRef.current) {
       // If switching between different Unicode glyphs, synchronously flush pending strokes for previous glyph first (safety fallback)
+      selectedPathIdRef.current = null;
+      useUIStore.getState().setSelectedStroke(null);
+      useUIStore.getState().setSelectedObjectAngle(null);
       if (lastFlushedUnicodeRef.current !== prevUnicodeRef.current) {
         flushCanvasToGlyph(prevUnicodeRef.current);
       }
@@ -1746,7 +1817,6 @@ export const CanvasEditor: React.FC = React.memo(() => {
     // Reset interactive states cleanly
     canvas.discardActiveObject();
     clearNodeEditing();
-    useUIStore.getState().setSelectedObjectAngle(null);
     penNodesRef.current = [];
     activeDragIndexRef.current = null;
     penDragStartPosRef.current = null;
@@ -1766,6 +1836,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
     renderOverlay();
 
     let rehydrateFailedCount = 0;
+    let matchedPathObj: Path | null = null;
     if (currentGlyph.paths && currentGlyph.paths.length > 0) {
       currentGlyph.paths.forEach((p) => {
         const pathObj = rehydrateFabricPath(p, {
@@ -1774,10 +1845,28 @@ export const CanvasEditor: React.FC = React.memo(() => {
         });
         if (pathObj) {
           canvas.add(pathObj);
+          if (selectedPathIdRef.current && (pathObj as any).id === selectedPathIdRef.current) {
+            matchedPathObj = pathObj;
+          }
         } else {
           rehydrateFailedCount++;
         }
       });
+    }
+
+    if (matchedPathObj && !isGlyphSwitch && !isProjectResetOrLoaded) {
+      canvas.setActiveObject(matchedPathObj);
+      if (activeTool === 'direct-select') {
+        loadPathForNodeEditing(matchedPathObj);
+      } else {
+        const strokeProps = extractSelectedStrokeProperties(matchedPathObj);
+        useUIStore.getState().setSelectedStroke(strokeProps);
+        useUIStore.getState().setSelectedObjectAngle(strokeProps.angle);
+      }
+    } else {
+      selectedPathIdRef.current = null;
+      useUIStore.getState().setSelectedStroke(null);
+      useUIStore.getState().setSelectedObjectAngle(null);
     }
 
     if (rehydrateFailedCount > 0) {
@@ -1796,6 +1885,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
     strokeColor,
     flushCanvasToGlyph,
     clearNodeEditing,
+    loadPathForNodeEditing,
     renderOverlay,
   ]);
 

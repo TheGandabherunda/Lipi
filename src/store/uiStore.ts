@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { CanvasTool, BrushTip, PenMode, StrokeCap, StrokeJoin, CanvasGuidelinesConfig, TracingConfig } from '../types/canvas';
+import type { CanvasTool, BrushTip, PenMode, StrokeCap, StrokeJoin, CanvasGuidelinesConfig, TracingConfig, SelectedStrokeProperties } from '../types/canvas';
 import type { KannadaCategory } from '../types/glyph';
 import type { VectorGlyphOutline } from '../constants/kannadaVectorOutlines';
 import { KANNADA_VECTOR_OUTLINES } from '../constants/kannadaVectorOutlines';
@@ -17,6 +17,7 @@ interface UIStoreState {
   strokeJoin: StrokeJoin;
   eraserSize: number;
   selectedObjectAngle: number | null;
+  selectedStroke: SelectedStrokeProperties | null;
 
   // Resizable Canvas & Splitter
   canvasWidth: number;
@@ -65,6 +66,9 @@ interface UIStoreState {
   setStrokeJoin: (join: StrokeJoin) => void;
   setEraserSize: (size: number) => void;
   setSelectedObjectAngle: (angle: number | null) => void;
+  setSelectedStroke: (stroke: SelectedStrokeProperties | null) => void;
+  updateSelectedStroke: (patch: Partial<SelectedStrokeProperties>) => void;
+  deselectStroke: () => void;
   setCanvasSize: (width: number, height: number) => void;
   setSidebarWidth: (width: number) => void;
   setGuidelines: (patch: Partial<CanvasGuidelinesConfig>) => void;
@@ -103,6 +107,7 @@ export const useUIStore = create<UIStoreState>((set) => ({
   strokeJoin: 'round',
   eraserSize: 24,
   selectedObjectAngle: null,
+  selectedStroke: null,
 
   canvasWidth: 800,
   canvasHeight: 800,
@@ -160,6 +165,26 @@ export const useUIStore = create<UIStoreState>((set) => ({
   setStrokeJoin: (strokeJoin) => set({ strokeJoin }),
   setEraserSize: (eraserSize) => set({ eraserSize }),
   setSelectedObjectAngle: (selectedObjectAngle) => set({ selectedObjectAngle }),
+  setSelectedStroke: (selectedStroke) => set({ selectedStroke }),
+  updateSelectedStroke: (patch) => {
+    set((s) => {
+      if (!s.selectedStroke) return s;
+      const updated = { ...s.selectedStroke, ...patch };
+      return {
+        selectedStroke: updated,
+        selectedObjectAngle: patch.angle !== undefined ? patch.angle : s.selectedObjectAngle,
+      };
+    });
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('lipi:update-selected-stroke', { detail: patch }));
+    }
+  },
+  deselectStroke: () => {
+    set({ selectedStroke: null, selectedObjectAngle: null });
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('lipi:deselect-stroke'));
+    }
+  },
   setCanvasSize: (w, h) => set({
     canvasWidth: Math.max(480, Math.min(1400, w)),
     canvasHeight: Math.max(480, Math.min(1400, h)),

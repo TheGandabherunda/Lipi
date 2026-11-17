@@ -64,10 +64,6 @@ export function applyCanvasInteractionMode(
   }
 
   // 2. Normal Tool Interaction Modes
-  if (activeTool !== 'select' && typeof canvas.discardActiveObject === 'function') {
-    canvas.discardActiveObject();
-  }
-
   switch (activeTool) {
     case 'select': {
       canvas.isDrawingMode = false;

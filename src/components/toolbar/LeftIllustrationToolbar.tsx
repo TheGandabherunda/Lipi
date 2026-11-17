@@ -71,6 +71,9 @@ export const LeftIllustrationToolbar: React.FC = () => {
   const setZoom = useUIStore((s) => s.setZoom);
   const resetZoom = useUIStore((s) => s.resetZoom);
   const selectedObjectAngle = useUIStore((s) => s.selectedObjectAngle);
+  const selectedStroke = useUIStore((s) => s.selectedStroke);
+  const updateSelectedStroke = useUIStore((s) => s.updateSelectedStroke);
+  const deselectStroke = useUIStore((s) => s.deselectStroke);
 
   const undo = useGlyphStore((s) => s.undo);
   const redo = useGlyphStore((s) => s.redo);
@@ -158,11 +161,11 @@ export const LeftIllustrationToolbar: React.FC = () => {
                 setIsFlyoutOpen(false);
               }}
               className="w-10 h-10 rounded-xl flex items-center justify-center border border-slate-200 hover:border-slate-300 transition-all cursor-pointer relative shadow-2xs group"
-              title="Stroke Color Palette"
+              title={selectedStroke ? "Selected Stroke Color Palette" : "Default Stroke Color Palette"}
             >
               <div
                 className="w-5.5 h-5.5 rounded-lg border-2 border-white shadow-xs group-hover:scale-105 transition-transform"
-                style={{ backgroundColor: strokeColor }}
+                style={{ backgroundColor: selectedStroke ? selectedStroke.strokeColor : strokeColor }}
               />
             </button>
 
@@ -172,7 +175,7 @@ export const LeftIllustrationToolbar: React.FC = () => {
                 <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
                   <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                     <Palette className="w-3.5 h-3.5 text-indigo-500" />
-                    Color Swatches
+                    {selectedStroke ? "Selected Stroke Color" : "Color Swatches"}
                   </span>
                   <button
                     type="button"
@@ -183,24 +186,31 @@ export const LeftIllustrationToolbar: React.FC = () => {
                   </button>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
-                  {COLOR_PRESETS.map((color) => (
-                    <button
-                      key={color.hex}
-                      type="button"
-                      onClick={() => {
-                        setStrokeColor(color.hex);
-                        setShowColorPopover(false);
-                      }}
-                      className={clsx(
-                        'w-12 h-9 rounded-xl flex items-center justify-center transition-transform hover:scale-105 border cursor-pointer',
-                        strokeColor === color.hex ? 'border-indigo-500 ring-2 ring-indigo-200' : 'border-slate-200'
-                      )}
-                      style={{ backgroundColor: color.hex }}
-                      title={color.name}
-                    >
-                      {strokeColor === color.hex && <Check className="w-4 h-4 text-white stroke-[3]" />}
-                    </button>
-                  ))}
+                  {COLOR_PRESETS.map((color) => {
+                    const activeColor = selectedStroke ? selectedStroke.strokeColor : strokeColor;
+                    return (
+                      <button
+                        key={color.hex}
+                        type="button"
+                        onClick={() => {
+                          if (selectedStroke) {
+                            updateSelectedStroke({ strokeColor: color.hex });
+                          } else {
+                            setStrokeColor(color.hex);
+                          }
+                          setShowColorPopover(false);
+                        }}
+                        className={clsx(
+                          'w-12 h-9 rounded-xl flex items-center justify-center transition-transform hover:scale-105 border cursor-pointer',
+                          activeColor === color.hex ? 'border-indigo-500 ring-2 ring-indigo-200' : 'border-slate-200'
+                        )}
+                        style={{ backgroundColor: color.hex }}
+                        title={color.name}
+                      >
+                        {activeColor === color.hex && <Check className="w-4 h-4 text-white stroke-[3]" />}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -282,25 +292,42 @@ export const LeftIllustrationToolbar: React.FC = () => {
       {/* 2. REFINED CONTEXTUAL TOOL OPTIONS FLYOUT (Opens right to it, aligned in the middle!) */}
       {isFlyoutOpen && (
         <div className="absolute left-16 top-1/2 -translate-y-1/2 z-40 w-76 max-h-[88vh] overflow-y-auto bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-2xl shadow-xl shadow-slate-300/40 p-4 flex flex-col gap-3.5 animate-in fade-in slide-in-from-left-2 duration-150 select-none">
-          {/* Header with Tool Name & Close Button */}
+          {/* Header with Tool Name / Selected Stroke & Close Button */}
           <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
             <div className="flex items-center gap-2">
               <div className="w-6 h-6 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
-                {activeTool === 'brush' && <Paintbrush className="w-3.5 h-3.5" />}
-                {activeTool === 'pen' && <PenTool className="w-3.5 h-3.5" />}
-                {activeTool === 'direct-select' && <MousePointer2 className="w-3.5 h-3.5" />}
-                {activeTool === 'select' && <MousePointer className="w-3.5 h-3.5" />}
-                {activeTool === 'eraser' && <Eraser className="w-3.5 h-3.5" />}
-                {activeTool === 'pan' && <Hand className="w-3.5 h-3.5" />}
+                {selectedStroke ? (
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                ) : (
+                  <>
+                    {activeTool === 'brush' && <Paintbrush className="w-3.5 h-3.5" />}
+                    {activeTool === 'pen' && <PenTool className="w-3.5 h-3.5" />}
+                    {activeTool === 'direct-select' && <MousePointer2 className="w-3.5 h-3.5" />}
+                    {activeTool === 'select' && <MousePointer className="w-3.5 h-3.5" />}
+                    {activeTool === 'eraser' && <Eraser className="w-3.5 h-3.5" />}
+                    {activeTool === 'pan' && <Hand className="w-3.5 h-3.5" />}
+                  </>
+                )}
               </div>
-              <span className="text-xs font-bold text-slate-800">
-                {activeTool === 'brush' && 'Brush Studio'}
-                {activeTool === 'pen' && 'Pen Tool Properties'}
-                {activeTool === 'direct-select' && 'Anchor & Node Editor'}
-                {activeTool === 'select' && 'Selection & Stroke'}
-                {activeTool === 'eraser' && 'Vector Eraser'}
-                {activeTool === 'pan' && 'Canvas Navigation'}
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-bold text-slate-800">
+                  {selectedStroke ? 'Selected Stroke' : (
+                    <>
+                      {activeTool === 'brush' && 'Brush Studio'}
+                      {activeTool === 'pen' && 'Pen Tool Properties'}
+                      {activeTool === 'direct-select' && 'Anchor & Node Editor'}
+                      {activeTool === 'select' && 'Selection & Stroke'}
+                      {activeTool === 'eraser' && 'Vector Eraser'}
+                      {activeTool === 'pan' && 'Canvas Navigation'}
+                    </>
+                  )}
+                </span>
+                {selectedStroke && (
+                  <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded-full border border-indigo-200">
+                    Selected
+                  </span>
+                )}
+              </div>
             </div>
 
             <button
@@ -314,10 +341,336 @@ export const LeftIllustrationToolbar: React.FC = () => {
           </div>
 
           {/* ======================================================== */}
-          {/* TOOL 1: BRUSH TOOL OPTIONS */}
+          {/* 1. SELECTED STROKE INSPECTOR (Active Selection)          */}
           {/* ======================================================== */}
-          {activeTool === 'brush' && (
+          {selectedStroke !== null ? (
             <div className="flex flex-col gap-3.5">
+              {/* Stroke Width Slider with Visual Circle Preview */}
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-700">Stroke Width</span>
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="rounded-full border border-slate-400 bg-slate-900 shrink-0"
+                      style={{
+                        width: Math.min(24, Math.max(3, selectedStroke.strokeWidth / 2)),
+                        height: Math.min(24, Math.max(3, selectedStroke.strokeWidth / 2)),
+                        backgroundColor: selectedStroke.strokeColor,
+                      }}
+                      title={`Physical stroke thickness: ${selectedStroke.strokeWidth}px`}
+                    />
+                    <span className="text-[11px] font-mono-code font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
+                      {selectedStroke.strokeWidth}px
+                    </span>
+                  </div>
+                </div>
+
+                <input
+                  type="range"
+                  min="2"
+                  max="64"
+                  step="2"
+                  value={selectedStroke.strokeWidth}
+                  onChange={(e) => updateSelectedStroke({ strokeWidth: Number(e.target.value) })}
+                  className="w-full accent-indigo-600 cursor-pointer h-2 bg-slate-200 rounded-lg"
+                />
+
+                <div className="grid grid-cols-6 gap-1 pt-1">
+                  {WEIGHT_PRESETS.map((px) => (
+                    <button
+                      key={px}
+                      type="button"
+                      onClick={() => updateSelectedStroke({ strokeWidth: px })}
+                      className={clsx(
+                        'py-1 rounded-md text-[10px] font-semibold border transition-all cursor-pointer text-center',
+                        selectedStroke.strokeWidth === px
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs font-bold'
+                          : 'border-slate-200 text-slate-600 hover:bg-slate-100'
+                      )}
+                    >
+                      {px}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Stroke Color */}
+              <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-100">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-700">Stroke Color</span>
+                  <span className="text-[10px] font-mono-code text-slate-500 uppercase">
+                    {selectedStroke.strokeColor}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="grid grid-cols-6 gap-1.5 flex-1">
+                    {COLOR_PRESETS.map((c) => (
+                      <button
+                        key={c.hex}
+                        type="button"
+                        onClick={() => updateSelectedStroke({ strokeColor: c.hex })}
+                        className={clsx(
+                          'h-6 rounded-lg transition-transform hover:scale-110 border cursor-pointer flex items-center justify-center',
+                          selectedStroke.strokeColor === c.hex ? 'border-indigo-600 ring-2 ring-indigo-300' : 'border-slate-200'
+                        )}
+                        style={{ backgroundColor: c.hex }}
+                        title={c.name}
+                      >
+                        {selectedStroke.strokeColor === c.hex && <Check className="w-3.5 h-3.5 text-white stroke-[3]" />}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="color"
+                    value={selectedStroke.strokeColor.startsWith('#') && selectedStroke.strokeColor.length === 7 ? selectedStroke.strokeColor : '#0f172a'}
+                    onChange={(e) => updateSelectedStroke({ strokeColor: e.target.value })}
+                    className="w-7 h-7 rounded-lg border border-slate-200 cursor-pointer p-0.5 bg-transparent"
+                    title="Custom Stroke Color"
+                  />
+                </div>
+              </div>
+
+              {/* Fill Color */}
+              <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-100">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-700">Fill Color</span>
+                  <span className="text-[10px] font-mono-code text-slate-500 uppercase">
+                    {selectedStroke.fillColor === 'transparent' || !selectedStroke.fillColor ? 'None' : selectedStroke.fillColor}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => updateSelectedStroke({ fillColor: 'transparent' })}
+                    className={clsx(
+                      'py-1 px-2 rounded-lg text-[10px] font-semibold border transition-all cursor-pointer text-center',
+                      (!selectedStroke.fillColor || selectedStroke.fillColor === 'transparent')
+                        ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-bold'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    )}
+                  >
+                    None
+                  </button>
+                  <div className="grid grid-cols-5 gap-1.5 flex-1">
+                    {COLOR_PRESETS.slice(0, 5).map((c) => (
+                      <button
+                        key={c.hex}
+                        type="button"
+                        onClick={() => updateSelectedStroke({ fillColor: c.hex })}
+                        className={clsx(
+                          'h-6 rounded-lg transition-transform hover:scale-110 border cursor-pointer flex items-center justify-center',
+                          selectedStroke.fillColor === c.hex ? 'border-indigo-600 ring-2 ring-indigo-300' : 'border-slate-200'
+                        )}
+                        style={{ backgroundColor: c.hex }}
+                        title={`Fill: ${c.name}`}
+                      >
+                        {selectedStroke.fillColor === c.hex && <Check className="w-3.5 h-3.5 text-white stroke-[3]" />}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="color"
+                    value={selectedStroke.fillColor && selectedStroke.fillColor.startsWith('#') && selectedStroke.fillColor.length === 7 ? selectedStroke.fillColor : '#0f172a'}
+                    onChange={(e) => updateSelectedStroke({ fillColor: e.target.value })}
+                    className="w-7 h-7 rounded-lg border border-slate-200 cursor-pointer p-0.5 bg-transparent"
+                    title="Custom Fill Color"
+                  />
+                </div>
+              </div>
+
+              {/* Stroke Caps & Corner Joins */}
+              <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[11px] font-bold text-slate-700">End Caps</span>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {(['round', 'butt', 'square'] as const).map((cap) => (
+                      <button
+                        key={cap}
+                        type="button"
+                        onClick={() => updateSelectedStroke({ strokeCap: cap })}
+                        className={clsx(
+                          'py-1 rounded-lg text-[10px] font-semibold border transition-all cursor-pointer capitalize text-center',
+                          selectedStroke.strokeCap === cap
+                            ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-bold'
+                            : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                        )}
+                      >
+                        {cap === 'round' ? 'Rounded' : cap}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <span className="text-[11px] font-bold text-slate-700">Corner Joins</span>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {(['round', 'miter', 'bevel'] as const).map((join) => (
+                      <button
+                        key={join}
+                        type="button"
+                        onClick={() => updateSelectedStroke({ strokeJoin: join })}
+                        className={clsx(
+                          'py-1 rounded-lg text-[10px] font-semibold border transition-all cursor-pointer capitalize text-center',
+                          selectedStroke.strokeJoin === join
+                            ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-bold'
+                            : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                        )}
+                      >
+                        {join === 'round' ? 'Rounded' : join}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Brush Tip Style */}
+              <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-100">
+                <span className="text-[11px] font-bold text-slate-700">Brush Style</span>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {(['round', 'calligraphy', 'chisel'] as const).map((tip) => (
+                    <button
+                      key={tip}
+                      type="button"
+                      onClick={() => updateSelectedStroke({ brushTip: tip })}
+                      className={clsx(
+                        'py-1.5 px-1 rounded-lg text-[10px] font-semibold border transition-all cursor-pointer capitalize text-center',
+                        selectedStroke.brushTip === tip
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs font-bold'
+                          : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                      )}
+                    >
+                      {tip === 'round' ? 'Round' : tip === 'calligraphy' ? 'Calligraphy 45°' : 'Chisel 90°'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Opacity */}
+              <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-100">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-700">Opacity</span>
+                  <span className="text-[11px] font-mono-code font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
+                    {Math.round(selectedStroke.opacity * 100)}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0.05"
+                  max="1"
+                  step="0.05"
+                  value={selectedStroke.opacity}
+                  onChange={(e) => updateSelectedStroke({ opacity: Number(e.target.value) })}
+                  className="w-full accent-indigo-600 cursor-pointer h-2 bg-slate-200 rounded-lg"
+                />
+                <div className="grid grid-cols-4 gap-1.5 pt-0.5">
+                  {[0.25, 0.5, 0.75, 1.0].map((op) => (
+                    <button
+                      key={op}
+                      type="button"
+                      onClick={() => updateSelectedStroke({ opacity: op })}
+                      className={clsx(
+                        'py-1 rounded-md text-[10px] font-semibold border transition-all cursor-pointer text-center',
+                        Math.abs(selectedStroke.opacity - op) < 0.01
+                          ? 'bg-indigo-50 border-indigo-500 text-indigo-700 font-bold'
+                          : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                      )}
+                    >
+                      {Math.round(op * 100)}%
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Rotation Angle (if rotated) */}
+              {selectedStroke.angle !== null && (
+                <div className="flex items-center justify-between p-2 rounded-xl bg-amber-50 border border-amber-200 text-xs">
+                  <span className="font-bold text-amber-800">Rotation Angle</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono-code font-bold text-amber-900 bg-amber-100/80 px-2 py-0.5 rounded-md">
+                      {selectedStroke.angle}°
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => updateSelectedStroke({ angle: 0 })}
+                      className="text-[10px] text-amber-700 hover:text-amber-900 hover:bg-amber-100 px-1.5 py-0.5 rounded transition-colors cursor-pointer"
+                      title="Reset angle to 0°"
+                    >
+                      Reset
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Direct Select Node Editing Controls (if direct-select tool is active) */}
+              {activeTool === 'direct-select' && (
+                <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
+                  <span className="text-[11px] font-bold text-sky-800">Node Operations</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => dispatchNodeAction('smooth')}
+                      className="py-1.5 px-2 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      title="Convert selected node to Smooth Bézier curve"
+                    >
+                      <Spline className="w-3.5 h-3.5 text-sky-600" />
+                      <span>Smooth</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => dispatchNodeAction('corner')}
+                      className="py-1.5 px-2 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      title="Convert selected node to sharp Corner"
+                    >
+                      <Square className="w-3.5 h-3.5 text-sky-600" />
+                      <span>Corner</span>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => dispatchNodeAction('delete')}
+                      className="flex-1 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      title="Delete selected anchor node (Delete / Backspace)"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                      <span>Delete Node</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => dispatchNodeAction('reverse')}
+                      className="flex-1 py-1.5 rounded-xl hover:bg-slate-100 text-slate-700 border border-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      title="Reverse contour direction (TrueType winding)"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Reverse</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Deselect Stroke Action Button */}
+              <div className="pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={deselectStroke}
+                  className="w-full py-2 px-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                  title="Deselect stroke (Esc)"
+                >
+                  <X className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Deselect Stroke</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* ======================================================== */}
+              {/* TOOL 1: BRUSH TOOL OPTIONS */}
+              {/* ======================================================== */}
+              {activeTool === 'brush' && (
+                <div className="flex flex-col gap-3.5">
               {/* Stroke Width Slider with Visual Circle Preview */}
               <div className="flex flex-col gap-1.5">
                 <div className="flex items-center justify-between">
@@ -862,6 +1215,8 @@ export const LeftIllustrationToolbar: React.FC = () => {
                 <div>• Ctrl + Mouse Wheel: Smooth Zoom</div>
               </div>
             </div>
+          )}
+            </>
           )}
         </div>
       )}
