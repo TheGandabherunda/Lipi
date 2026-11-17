@@ -1,7 +1,8 @@
 import { create } from 'zustand';
-import type { GlyphData, VectorPathData } from '../types/glyph';
+import type { GlyphData, VectorPathData, GlyphStatus, FontComponent } from '../types/glyph';
 import type { FontMetrics, LipiFileSchema, LipiProjectMetadata } from '../types/lipiFormat';
 import { initialKannadaGlyphs } from '../constants/kannadaCharacters';
+import { KANNADA_STANDARD_COMPONENTS } from '../constants/kannadaComponents';
 import { useUIStore } from './uiStore';
 import { translateSVGPathString } from '../utils/svgExport';
 import { cloneGlyphRecord, cloneVectorPaths } from '../utils/glyphUtils';
@@ -44,7 +45,14 @@ interface GlyphStoreState {
   updateActiveGlyphPaths: (paths: VectorPathData[], recordHistory?: boolean) => void;
   updateGlyphPaths: (unicode: string, paths: VectorPathData[], recordHistory?: boolean) => void;
   updateAdvanceWidth: (unicode: string, width: number) => void;
+  updateGlyphMetrics: (unicode: string, patch: { advanceWidth?: number; leftSideBearing?: number; rightSideBearing?: number }) => void;
+  setGlyphStatus: (unicode: string, status: GlyphStatus) => void;
   clearActiveGlyph: () => void;
+
+  // Components Library
+  components: FontComponent[];
+  addComponent: (comp: FontComponent) => void;
+  insertComponentIntoActiveGlyph: (compId: string, position?: { x: number; y: number }) => void;
 
   // History Operations
   undo: () => void;
@@ -52,7 +60,10 @@ interface GlyphStoreState {
   canUndo: (unicode?: string) => boolean;
   canRedo: (unicode?: string) => boolean;
 
-  // Project Actions
+  // Project Actions & Dirty Status
+  isDirty: boolean;
+  markDirty: () => void;
+  markClean: () => void;
   projectRevision: number;
   updateMetadata: (patch: Partial<LipiProjectMetadata>) => void;
   resetProject: (name?: string) => void;
@@ -179,6 +190,11 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
   historyIndex: 0,
   projectRevision: 0,
   clipboard: null,
+  isDirty: false,
+  components: KANNADA_STANDARD_COMPONENTS,
+
+  markDirty: () => set({ isDirty: true }),
+  markClean: () => set({ isDirty: false }),
 
   copyPaths: (paths?: VectorPathData[]) => {
     const { activeUnicode, glyphs } = get();
@@ -372,18 +388,22 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
 
     const clonedPaths = cloneVectorPaths(paths);
     const isEdited = clonedPaths.length > 0;
+    const newStatus: GlyphStatus = !isEdited
+      ? 'empty'
+      : (targetGlyph.status === 'ready' ? 'ready' : 'started');
     const updatedGlyphs = {
       ...glyphs,
       [unicode]: {
         ...targetGlyph,
         paths: cloneVectorPaths(clonedPaths),
         isEdited,
+        status: newStatus,
         lastModified: Date.now(),
       },
     };
 
     if (!recordHistory) {
-      set({ glyphs: updatedGlyphs });
+      set({ glyphs: updatedGlyphs, isDirty: true });
       return;
     }
 
@@ -396,7 +416,7 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
     // If new paths are identical to top-of-stack, do not push redundant duplicate
     const currentTop = targetHistory.stack[targetHistory.index];
     if (currentTop && pathsAreEqual(currentTop, clonedPaths)) {
-      set({ glyphs: updatedGlyphs });
+      set({ glyphs: updatedGlyphs, isDirty: true });
       return;
     }
 
@@ -423,6 +443,7 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
 
     if (unicode === activeUnicode) {
       set({
+        isDirty: true,
         glyphs: updatedGlyphs,
         glyphHistories: updatedHistories,
         history: newStack.map((entry) => cloneVectorPaths(entry)),
@@ -430,6 +451,7 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
       });
     } else {
       set({
+        isDirty: true,
         glyphs: updatedGlyphs,
         glyphHistories: updatedHistories,
       });
@@ -442,19 +464,81 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
   },
 
   updateAdvanceWidth: (unicode: string, width: number) => {
+    get().updateGlyphMetrics(unicode, { advanceWidth: width });
+  },
+
+  updateGlyphMetrics: (unicode: string, patch: { advanceWidth?: number; leftSideBearing?: number; rightSideBearing?: number }) => {
+    const { glyphs } = get();
+    const currentGlyph = glyphs[unicode];
+    if (!currentGlyph) return;
+
+    const newAdvance = patch.advanceWidth !== undefined
+      ? Math.max(50, Math.min(4000, Math.round(patch.advanceWidth)))
+      : currentGlyph.advanceWidth;
+    const newLsb = patch.leftSideBearing !== undefined
+      ? Math.max(0, Math.min(2000, Math.round(patch.leftSideBearing)))
+      : currentGlyph.leftSideBearing;
+    const newRsb = patch.rightSideBearing !== undefined
+      ? Math.max(0, Math.min(2000, Math.round(patch.rightSideBearing)))
+      : currentGlyph.rightSideBearing;
+
+    set({
+      isDirty: true,
+      glyphs: {
+        ...glyphs,
+        [unicode]: {
+          ...currentGlyph,
+          advanceWidth: newAdvance,
+          leftSideBearing: newLsb,
+          rightSideBearing: newRsb,
+          lastModified: Date.now(),
+        },
+      },
+    });
+  },
+
+  setGlyphStatus: (unicode: string, status: GlyphStatus) => {
     const { glyphs } = get();
     const currentGlyph = glyphs[unicode];
     if (!currentGlyph) return;
 
     set({
+      isDirty: true,
       glyphs: {
         ...glyphs,
         [unicode]: {
           ...currentGlyph,
-          advanceWidth: Math.max(100, Math.min(2500, Math.round(width))),
+          status,
+          lastModified: Date.now(),
         },
       },
     });
+  },
+
+  addComponent: (comp: FontComponent) => {
+    set((s) => ({
+      isDirty: true,
+      components: [...s.components, comp],
+    }));
+  },
+
+  insertComponentIntoActiveGlyph: (compId: string, position?: { x: number; y: number }) => {
+    const { components, activeUnicode, glyphs } = get();
+    const comp = components.find((c) => c.id === compId);
+    const targetGlyph = glyphs[activeUnicode];
+    if (!comp || !targetGlyph) return;
+
+    const dx = position?.x ?? 0;
+    const dy = position?.y ?? 0;
+
+    const stampedPaths: VectorPathData[] = cloneVectorPaths(comp.paths).map((p, idx) => ({
+      ...p,
+      id: `comp_${Date.now()}_${idx}`,
+      pathString: dx !== 0 || dy !== 0 ? translateSVGPathString(p.pathString, dx, dy) : p.pathString,
+    }));
+
+    const newPaths = [...cloneVectorPaths(targetGlyph.paths || []), ...stampedPaths];
+    get().updateActiveGlyphPaths(newPaths, true);
   },
 
   clearActiveGlyph: () => {
@@ -676,6 +760,8 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
       history: [[]],
       historyIndex: 0,
       projectRevision: (get().projectRevision || 0) + 1,
+      isDirty: false,
+      components: KANNADA_STANDARD_COMPONENTS,
     });
 
     if (typeof window !== 'undefined') {
@@ -707,7 +793,7 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
 
     const payload: LipiFileSchema = {
       format: 'LIPI_PROJECT',
-      schemaVersion: '1.1.0',
+      schemaVersion: '2.0.0',
       metadata: {
         ...metadata,
         metrics: sanitizeMetrics(metadata.metrics),
@@ -716,6 +802,7 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
       glyphs: cloneGlyphRecord(glyphs),
       weightProfiles: profilesCopy,
       glyphHistories: serializedHistories,
+      components: get().components,
     };
     return JSON.stringify(payload, null, 2);
   },
@@ -733,6 +820,7 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+    set({ isDirty: false });
   },
 
   loadLipiFileContent: (jsonString: string) => {
@@ -773,6 +861,10 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
             fabricJSON: p.fabricJSON,
           }));
 
+        const status: GlyphStatus = glyph.status || (validatedPaths.length > 0 ? 'started' : 'empty');
+        const lsb = typeof glyph.leftSideBearing === 'number' ? glyph.leftSideBearing : 50;
+        const rsb = typeof glyph.rightSideBearing === 'number' ? glyph.rightSideBearing : 50;
+
         if (mergedGlyphs[unicode]) {
           mergedGlyphs[unicode] = {
             ...mergedGlyphs[unicode],
@@ -780,6 +872,9 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
             unicode,
             paths: validatedPaths,
             advanceWidth: Number(glyph.advanceWidth) || mergedGlyphs[unicode].advanceWidth,
+            leftSideBearing: lsb,
+            rightSideBearing: rsb,
+            status,
             isEdited: validatedPaths.length > 0,
             lastModified: glyph.lastModified || Date.now(),
           };
@@ -791,6 +886,9 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
             category: glyph.category || 'modifiers',
             paths: validatedPaths,
             advanceWidth: Number(glyph.advanceWidth) || 780,
+            leftSideBearing: lsb,
+            rightSideBearing: rsb,
+            status,
             isEdited: validatedPaths.length > 0,
             lastModified: glyph.lastModified || Date.now(),
           };
@@ -873,6 +971,10 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
         index: 0,
       };
 
+      const restoredComponents = Array.isArray(parsed.components) && parsed.components.length > 0
+        ? parsed.components
+        : KANNADA_STANDARD_COMPONENTS;
+
       set({
         metadata: {
           ...DEFAULT_METADATA,
@@ -891,6 +993,8 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
         history: activeHistory.stack.map((entry) => cloneVectorPaths(entry)),
         historyIndex: activeHistory.index,
         projectRevision: (get().projectRevision || 0) + 1,
+        isDirty: false,
+        components: restoredComponents,
       });
 
       if (typeof window !== 'undefined') {

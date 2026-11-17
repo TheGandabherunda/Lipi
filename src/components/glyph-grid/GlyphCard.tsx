@@ -126,15 +126,26 @@ export const GlyphCard: React.FC<GlyphCardProps> = React.memo(({ glyph, isActive
         )}
       </div>
 
-      {/* 3. Bottom Bar: Drawn Strokes Count only when letter is edited */}
-      {hasPaths && (
-        <div className="flex items-center pt-0.5 text-[10px]">
-          <span className="flex items-center gap-1 text-emerald-600 font-semibold">
-            <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+      {/* 3. Bottom Bar: Status Badge and Advance Width */}
+      <div className="flex items-center justify-between pt-0.5 text-[10px]">
+        {glyph.status === 'ready' ? (
+          <span className="flex items-center gap-1 text-emerald-700 font-bold bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-md">
+            <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" />
+            <span>Ready</span>
+          </span>
+        ) : hasPaths ? (
+          <span className="flex items-center gap-1 text-indigo-700 font-medium bg-indigo-50 border border-indigo-200/80 px-1.5 py-0.2 rounded-md">
+            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
             <span>{glyph.paths.length} {glyph.paths.length === 1 ? 'stroke' : 'strokes'}</span>
           </span>
-        </div>
-      )}
+        ) : (
+          <span className="text-slate-400 text-[9px] font-medium">Empty</span>
+        )}
+
+        <span className="text-[9px] font-mono text-slate-400" title="Advance Width">
+          {glyph.advanceWidth || 778}
+        </span>
+      </div>
 
       {/* Quick Paste Button on Hover if Clipboard has strokes */}
       {clipboard && clipboard.paths.length > 0 && !isActive && (

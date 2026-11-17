@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import { useGlyphStore } from '../../store/glyphStore';
 import { useUIStore } from '../../store/uiStore';
 import { parseUserFontFile } from '../../utils/fontImporter';
+import { CanvasGridSettings } from '../canvas/CanvasGridSettings';
 import {
   Save,
   Download,
@@ -15,6 +16,9 @@ import {
   Wand2,
   Keyboard,
   X,
+  Layers,
+  MoveHorizontal,
+  HelpCircle,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -35,6 +39,8 @@ export const TopNavigation: React.FC<TopNavigationProps> = ({ onOpenPreview }) =
   const downloadLipiFile = useGlyphStore((s) => s.downloadLipiFile);
   const loadLipiFileContent = useGlyphStore((s) => s.loadLipiFileContent);
   const activeUnicode = useGlyphStore((s) => s.activeUnicode);
+  const isDirty = useGlyphStore((s) => s.isDirty);
+  const components = useGlyphStore((s) => s.components);
 
   // UI Store
   const setSelectedGoogleFont = useUIStore((s) => s.setSelectedGoogleFont);
@@ -44,6 +50,11 @@ export const TopNavigation: React.FC<TopNavigationProps> = ({ onOpenPreview }) =
   const setExportModalOpen = useUIStore((s) => s.setExportModalOpen);
   const setSettingsModalOpen = useUIStore((s) => s.setSettingsModalOpen);
   const setShortcutsModalOpen = useUIStore((s) => s.setShortcutsModalOpen);
+  const isSpacingPanelOpen = useUIStore((s) => s.isSpacingPanelOpen);
+  const setIsSpacingPanelOpen = useUIStore((s) => s.setIsSpacingPanelOpen);
+  const isComponentsDrawerOpen = useUIStore((s) => s.isComponentsDrawerOpen);
+  const setIsComponentsDrawerOpen = useUIStore((s) => s.setIsComponentsDrawerOpen);
+  const setIsOnboardingOpen = useUIStore((s) => s.setIsOnboardingOpen);
 
   // Close options dropdown when clicking outside
   useEffect(() => {
@@ -163,31 +174,85 @@ export const TopNavigation: React.FC<TopNavigationProps> = ({ onOpenPreview }) =
 
         <div className="h-5 w-px bg-slate-200" />
 
-        {/* Editable Project Font Name */}
-        <div className="flex items-center gap-1 bg-slate-50 border border-slate-200/80 rounded-xl px-2.5 py-1">
+        {/* Editable Project Font Name & Dirty Indicator */}
+        <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 rounded-xl px-2.5 py-1">
           <FileCode2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
           <input
             type="text"
             value={metadata.name}
             onChange={(e) => updateMetadata({ name: e.target.value })}
-            className="bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-slate-300 px-1 py-0.5 rounded text-xs font-semibold text-slate-800 focus:outline-none transition-colors w-32"
+            className="bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-slate-300 px-1 py-0.5 rounded text-xs font-semibold text-slate-800 focus:outline-none transition-colors w-28 sm:w-32"
             title="Rename project font"
           />
+          {isDirty && (
+            <span
+              className="flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200/90 px-1.5 py-0.2 rounded-full cursor-help"
+              title="Unsaved changes in this session. Save Project (.lipi) to keep a local backup."
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+              Unsaved
+            </span>
+          )}
         </div>
       </div>
 
-      {/* CENTER: Selected Object Angle (shown only when a stroke is rotated) */}
-      <div className="flex items-center justify-center">
+      {/* CENTER: Quick Studios & Angle indicator */}
+      <div className="flex items-center gap-2">
         {selectedObjectAngle !== null && (
           <div className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 font-mono-code text-xs font-bold shadow-2xs">
             <RotateCw className="w-3.5 h-3.5 text-amber-600" />
             <span>Angle: {selectedObjectAngle}°</span>
           </div>
         )}
+
+        {/* Components Drawer Button */}
+        <button
+          type="button"
+          onClick={() => setIsComponentsDrawerOpen(!isComponentsDrawerOpen)}
+          className={clsx(
+            'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer shadow-2xs',
+            isComponentsDrawerOpen
+              ? 'bg-indigo-600 text-white border-indigo-600 shadow-indigo-600/20'
+              : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700'
+          )}
+          title="Open Kannada Typography Components Library"
+        >
+          <Layers className="w-3.5 h-3.5" />
+          <span className="hidden md:inline">Components</span>
+          {components && components.length > 0 && (
+            <span
+              className={clsx(
+                'text-[10px] font-bold px-1.5 py-0.2 rounded-full',
+                isComponentsDrawerOpen ? 'bg-indigo-500 text-white' : 'bg-slate-100 text-slate-600'
+              )}
+            >
+              {components.length}
+            </span>
+          )}
+        </button>
+
+        {/* Spacing & Sidebearings Studio Button */}
+        <button
+          type="button"
+          onClick={() => setIsSpacingPanelOpen(!isSpacingPanelOpen)}
+          className={clsx(
+            'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer shadow-2xs',
+            isSpacingPanelOpen
+              ? 'bg-indigo-600 text-white border-indigo-600 shadow-indigo-600/20'
+              : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700'
+          )}
+          title="Open Glyph Spacing & Sidebearings Studio"
+        >
+          <MoveHorizontal className="w-3.5 h-3.5" />
+          <span className="hidden md:inline">Spacing Studio</span>
+        </button>
+
+        {/* Grid & Snapping Dropdown */}
+        <CanvasGridSettings />
       </div>
 
       {/* RIGHT: Type Preview, Export Package & Options Icon Button with Dropdown */}
-      <div className="flex items-center gap-2.5 shrink-0">
+      <div className="flex items-center gap-2 shrink-0">
         {/* Hidden File Inputs */}
         <input
           type="file"
@@ -227,6 +292,17 @@ export const TopNavigation: React.FC<TopNavigationProps> = ({ onOpenPreview }) =
         </button>
 
         <div className="h-5 w-px bg-slate-200 mx-0.5" />
+
+        {/* Quick Tour / Guide */}
+        <button
+          type="button"
+          onClick={() => setIsOnboardingOpen(true)}
+          className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 border border-slate-200/80 transition-colors cursor-pointer shadow-2xs"
+          title="Kannada Font Design Quick Guide & Walkthrough"
+        >
+          <HelpCircle className="w-3.5 h-3.5 text-indigo-600" />
+          <span className="hidden sm:inline">Guide</span>
+        </button>
 
         {/* Options Icon Button with Dropdown (Keeps remaining options clutter-free) */}
         <div ref={optionsMenuRef} className="relative">

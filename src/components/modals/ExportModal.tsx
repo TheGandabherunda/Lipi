@@ -3,6 +3,7 @@ import { useGlyphStore } from '../../store/glyphStore';
 import { useUIStore } from '../../store/uiStore';
 import { downloadFontPackage } from '../../utils/fontCompiler';
 import { downloadGlyphSVG, glyphToSVG } from '../../utils/svgExport';
+import { validateProjectPreflight } from '../../utils/preflightValidator';
 import {
   X,
   Download,
@@ -20,6 +21,9 @@ import {
   Laptop,
   Check,
   Search,
+  ShieldCheck,
+  AlertTriangle,
+  AlertCircle,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -29,6 +33,7 @@ export const ExportModal: React.FC = () => {
   const [validationError, setValidationError] = useState<string | null>(null);
   const [testText, setTestText] = useState<string>('ಅಮ್ಮ');
   const [showWindowsGuide, setShowWindowsGuide] = useState<boolean>(true);
+  const [showPreflightDetails, setShowPreflightDetails] = useState<boolean>(false);
   const [downloadSuccessToast, setDownloadSuccessToast] = useState<string | null>(null);
 
   const isOpen = useUIStore((s) => s.isExportModalOpen);
@@ -47,11 +52,23 @@ export const ExportModal: React.FC = () => {
     [glyphs]
   );
 
+  const preflightReport = useMemo(() => {
+    return validateProjectPreflight(metadata, glyphs);
+  }, [metadata, glyphs]);
+
   if (!isOpen) return null;
 
   const handleDownloadFont = async (format: 'ttf' | 'otf' | 'woff' | 'zip') => {
     try {
       setValidationError(null);
+      if (!preflightReport.canExport) {
+        setValidationError(
+          `Export blocked by preflight validation (${preflightReport.errorCount} blocking error${preflightReport.errorCount === 1 ? '' : 's'}). Inspect Preflight Quality Report below for required fixes.`
+        );
+        setShowPreflightDetails(true);
+        return;
+      }
+
       setIsExporting(format);
       const canvasWidth = useUIStore.getState().canvasWidth || 800;
       const canvasHeight = useUIStore.getState().canvasHeight || 800;
@@ -65,7 +82,13 @@ export const ExportModal: React.FC = () => {
         { canvasWidth, canvasHeight, mapLatinKeys }
       );
       setDownloadSuccessToast(
-        format === 'zip' ? 'Complete font package (.zip)' : `OpenType font binary (.OTF)`
+        format === 'zip'
+          ? 'Complete font package (.zip)'
+          : format === 'otf'
+          ? 'OpenType font binary (.OTF)'
+          : format === 'ttf'
+          ? 'TrueType font binary (.TTF)'
+          : 'Web Open Font Format (.WOFF)'
       );
       setTimeout(() => setDownloadSuccessToast(null), 4000);
     } catch (err) {
@@ -165,6 +188,109 @@ export const ExportModal: React.FC = () => {
               <span>Downloaded <strong>{downloadSuccessToast}</strong> successfully. Check your browser downloads folder!</span>
             </div>
           )}
+
+          {/* Preflight Quality Report Banner */}
+          <div
+            className={clsx(
+              'p-4 rounded-2xl border transition-all flex flex-col gap-2.5 shadow-2xs',
+              preflightReport.canExport
+                ? 'bg-emerald-50/70 border-emerald-200'
+                : 'bg-rose-50/70 border-rose-200'
+            )}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                {preflightReport.canExport ? (
+                  <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                    <ShieldCheck className="w-5 h-5" />
+                  </div>
+                ) : (
+                  <div className="w-8 h-8 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                    <AlertCircle className="w-5 h-5" />
+                  </div>
+                )}
+                <div className="flex flex-col">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-900">
+                      {preflightReport.canExport
+                        ? 'Preflight Verification Passed'
+                        : `Preflight Verification Blocked (${preflightReport.errorCount} Error${preflightReport.errorCount === 1 ? '' : 's'})`}
+                    </span>
+                    <span
+                      className={clsx(
+                        'text-[10px] font-bold px-2 py-0.5 rounded-full uppercase',
+                        preflightReport.canExport
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-rose-100 text-rose-800'
+                      )}
+                    >
+                      {preflightReport.canExport ? 'Ready to Export' : 'Action Required'}
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-slate-500 mt-0.5">
+                    {preflightReport.readyGlyphsCount} ready &bull; {preflightReport.startedGlyphsCount} in progress &bull; {preflightReport.warningCount} warning(s)
+                  </span>
+                </div>
+              </div>
+
+              {preflightReport.issues.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowPreflightDetails(!showPreflightDetails)}
+                  className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer flex items-center gap-1 shadow-2xs"
+                >
+                  <span>{showPreflightDetails ? 'Hide Diagnostics' : `Diagnostics (${preflightReport.issues.length})`}</span>
+                  <ChevronDown
+                    className={clsx(
+                      'w-3.5 h-3.5 transition-transform duration-200',
+                      showPreflightDetails && 'rotate-180'
+                    )}
+                  />
+                </button>
+              )}
+            </div>
+
+            {/* Diagnostics List */}
+            {showPreflightDetails && preflightReport.issues.length > 0 && (
+              <div className="mt-1 pt-2.5 border-t border-slate-200/60 flex flex-col gap-2 max-h-48 overflow-y-auto pr-1">
+                {preflightReport.issues.map((issue, idx) => (
+                  <div
+                    key={idx}
+                    className={clsx(
+                      'p-2.5 rounded-xl border text-xs flex flex-col gap-1',
+                      issue.severity === 'error'
+                        ? 'bg-white border-rose-200 text-rose-900'
+                        : issue.severity === 'warning'
+                        ? 'bg-white border-amber-200 text-amber-900'
+                        : 'bg-white border-sky-200 text-sky-900'
+                    )}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold flex items-center gap-1.5">
+                        {issue.severity === 'error' && (
+                          <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                        )}
+                        {issue.severity === 'warning' && (
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                        )}
+                        {issue.severity === 'info' && (
+                          <Info className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                        )}
+                        <span>{issue.glyphCharacter} ({issue.glyphUnicode})</span>
+                      </span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider opacity-75">
+                        {issue.severity}
+                      </span>
+                    </div>
+                    <p className="text-[11px] leading-snug">{issue.message}</p>
+                    {issue.suggestion && (
+                      <p className="text-[10px] opacity-80 italic">Fix: {issue.suggestion}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Section A: "Where is my letter?" & Visual Glyph Verification */}
           <div className="p-4 rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50/60 via-slate-50/40 to-white flex flex-col gap-3.5 shadow-2xs">
@@ -370,8 +496,14 @@ export const ExportModal: React.FC = () => {
             <button
               type="button"
               onClick={() => handleDownloadFont('zip')}
-              disabled={isExporting !== null}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-md shadow-indigo-600/25 shrink-0"
+              disabled={isExporting !== null || !preflightReport.canExport}
+              className={clsx(
+                'px-5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shrink-0',
+                !preflightReport.canExport
+                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                  : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-600/25 cursor-pointer'
+              )}
+              title={!preflightReport.canExport ? 'Preflight blocking errors must be resolved first' : 'Export Complete ZIP'}
             >
               {isExporting === 'zip' ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -382,36 +514,104 @@ export const ExportModal: React.FC = () => {
             </button>
           </div>
 
-          {/* Section E: Individual Font Binary */}
+          {/* Section E: Individual Font Binaries (.otf, .ttf, .woff) */}
           <div className="flex flex-col gap-2">
             <span className="text-xs font-bold text-slate-700">
-              Individual Font Binary
+              Individual Font Formats
             </span>
-            <div className="p-3.5 rounded-2xl border border-slate-200 bg-white hover:border-indigo-300 hover:shadow-xs transition-all flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 shrink-0">
-                  <FileCheck className="w-4 h-4" />
+            <div className="grid grid-cols-3 gap-2.5">
+              {/* OTF */}
+              <div className="p-3 rounded-2xl border border-slate-200 bg-white hover:border-indigo-300 hover:shadow-xs transition-all flex flex-col justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 shrink-0">
+                    <FileCheck className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 block">OpenType (.otf)</span>
+                    <span className="text-[10px] text-slate-400">PostScript CFF</span>
+                  </div>
                 </div>
-                <div>
-                  <span className="text-xs font-bold text-slate-800 block">OpenType Font (.otf)</span>
-                  <span className="text-[11px] text-slate-500">
-                    Standard installable OpenType binary with PostScript CFF outlines. Universally supported across Windows, macOS, Linux, iOS, Android, Figma, Adobe apps, and web @font-face.
-                  </span>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadFont('otf')}
+                  disabled={isExporting !== null || !preflightReport.canExport}
+                  className={clsx(
+                    'w-full py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors',
+                    !preflightReport.canExport
+                      ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                      : 'bg-slate-50 hover:bg-indigo-600 hover:text-white border border-slate-200 hover:border-indigo-600 text-slate-700 cursor-pointer'
+                  )}
+                >
+                  {isExporting === 'otf' ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5" />
+                  )}
+                  <span>Export .OTF</span>
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => handleDownloadFont('otf')}
-                disabled={isExporting !== null}
-                className="px-4 py-2 bg-slate-50 hover:bg-indigo-600 hover:text-white border border-slate-200 hover:border-indigo-600 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer shrink-0"
-              >
-                {isExporting === 'otf' ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Download className="w-3.5 h-3.5" />
-                )}
-                <span>Export .OTF</span>
-              </button>
+
+              {/* TTF */}
+              <div className="p-3 rounded-2xl border border-slate-200 bg-white hover:border-indigo-300 hover:shadow-xs transition-all flex flex-col justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 shrink-0">
+                    <FileCheck className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 block">TrueType (.ttf)</span>
+                    <span className="text-[10px] text-slate-400">Quadratic Bézier</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadFont('ttf')}
+                  disabled={isExporting !== null || !preflightReport.canExport}
+                  className={clsx(
+                    'w-full py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors',
+                    !preflightReport.canExport
+                      ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                      : 'bg-slate-50 hover:bg-indigo-600 hover:text-white border border-slate-200 hover:border-indigo-600 text-slate-700 cursor-pointer'
+                  )}
+                >
+                  {isExporting === 'ttf' ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5" />
+                  )}
+                  <span>Export .TTF</span>
+                </button>
+              </div>
+
+              {/* WOFF */}
+              <div className="p-3 rounded-2xl border border-slate-200 bg-white hover:border-indigo-300 hover:shadow-xs transition-all flex flex-col justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 shrink-0">
+                    <FileCheck className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 block">Web Font (.woff)</span>
+                    <span className="text-[10px] text-slate-400">@font-face ready</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadFont('woff')}
+                  disabled={isExporting !== null || !preflightReport.canExport}
+                  className={clsx(
+                    'w-full py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors',
+                    !preflightReport.canExport
+                      ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                      : 'bg-slate-50 hover:bg-indigo-600 hover:text-white border border-slate-200 hover:border-indigo-600 text-slate-700 cursor-pointer'
+                  )}
+                >
+                  {isExporting === 'woff' ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5" />
+                  )}
+                  <span>Export .WOFF</span>
+                </button>
+              </div>
             </div>
           </div>
 

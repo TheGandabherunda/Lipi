@@ -11,7 +11,7 @@ describe('kannadaCharacters', () => {
       expect(charDef.unicode).toMatch(/^U\+[0-9A-F]{4}$/);
       expect(charDef.character).toBeTruthy();
       expect(charDef.defaultAdvanceWidth).toBeGreaterThan(0);
-      expect(['swaragalu', 'vyanjanagalu', 'gunithakshara', 'numbers', 'yogavahagalu', 'modifiers']).toContain(charDef.category);
+      expect(['swaragalu', 'vyanjanagalu', 'gunithakshara', 'numbers', 'yogavahagalu', 'modifiers', 'ottakshara', 'symbols']).toContain(charDef.category);
     });
   });
 });

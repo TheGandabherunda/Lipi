@@ -696,6 +696,172 @@ export const KANNADA_CHARACTERS_LIST: KannadaCharacterDefinition[] = [
     "name": "KANNADA AI LENGTH MARK",
     "category": "modifiers",
     "defaultAdvanceWidth": 183
+  },
+  // ==========================================
+  // ARCHAIC KANNADA CHARACTERS (ಹಳಗನ್ನಡ ಲಿಪಿ)
+  // ==========================================
+  {
+    "unicode": "U+0C8C",
+    "character": "ಌ",
+    "name": "KANNADA LETTER VOCALIC L",
+    "category": "swaragalu",
+    "defaultAdvanceWidth": 1191
+  },
+  {
+    "unicode": "U+0CE0",
+    "character": "ೠ",
+    "name": "KANNADA LETTER VOCALIC RR",
+    "category": "swaragalu",
+    "defaultAdvanceWidth": 1250
+  },
+  {
+    "unicode": "U+0CE1",
+    "character": "ೡ",
+    "name": "KANNADA LETTER VOCALIC LL",
+    "category": "swaragalu",
+    "defaultAdvanceWidth": 1250
+  },
+  {
+    "unicode": "U+0CB1",
+    "character": "ಱ",
+    "name": "KANNADA LETTER RRA",
+    "category": "vyanjanagalu",
+    "defaultAdvanceWidth": 780,
+    "sampleWord": "ಱಂಪ",
+    "sampleWordMeaning": "Uproar / Tumult"
+  },
+  {
+    "unicode": "U+0CDE",
+    "character": "ೞ",
+    "name": "KANNADA LETTER LLLA",
+    "category": "vyanjanagalu",
+    "defaultAdvanceWidth": 840,
+    "sampleWord": "ಕೞ್ದು",
+    "sampleWordMeaning": "Flowing / Stream"
+  },
+  // ==========================================
+  // KANNADA SYMBOLS & PUNCTUATION (ಚಿಹ್ನೆಗಳು)
+  // ==========================================
+  {
+    "unicode": "U+0CF1",
+    "character": "ೱ",
+    "name": "KANNADA SIGN JIHVAMULIYA",
+    "category": "symbols",
+    "defaultAdvanceWidth": 750
+  },
+  {
+    "unicode": "U+0CF2",
+    "character": "ೲ",
+    "name": "KANNADA SIGN UPADHMANIYA",
+    "category": "symbols",
+    "defaultAdvanceWidth": 750
+  },
+  {
+    "unicode": "U+0964",
+    "character": "।",
+    "name": "DANDA (FULL STOP)",
+    "category": "symbols",
+    "defaultAdvanceWidth": 350
+  },
+  {
+    "unicode": "U+0965",
+    "character": "॥",
+    "name": "DOUBLE DANDA (VERSE END)",
+    "category": "symbols",
+    "defaultAdvanceWidth": 550
+  },
+  // ==========================================
+  // KEY OTTAKSHARA / SUBJOINED FORMS (ಒತ್ತಕ್ಷರಗಳು)
+  // ==========================================
+  {
+    "unicode": "U+E001",
+    "character": "್ಕ",
+    "name": "KANNADA SUBJOINED KA (KA-VATTU)",
+    "category": "ottakshara",
+    "defaultAdvanceWidth": 560,
+    "sampleWord": "ಅಕ್ಕ",
+    "sampleWordMeaning": "Elder Sister"
+  },
+  {
+    "unicode": "U+E002",
+    "character": "್ತ",
+    "name": "KANNADA SUBJOINED TA (TA-VATTU)",
+    "category": "ottakshara",
+    "defaultAdvanceWidth": 540,
+    "sampleWord": "ಅತ್ತೆ",
+    "sampleWordMeaning": "Aunt"
+  },
+  {
+    "unicode": "U+E003",
+    "character": "್ನ",
+    "name": "KANNADA SUBJOINED NA (NA-VATTU)",
+    "category": "ottakshara",
+    "defaultAdvanceWidth": 520,
+    "sampleWord": "ಅಣ್ಣ",
+    "sampleWordMeaning": "Elder Brother"
+  },
+  {
+    "unicode": "U+E004",
+    "character": "್ಪ",
+    "name": "KANNADA SUBJOINED PA (PA-VATTU)",
+    "category": "ottakshara",
+    "defaultAdvanceWidth": 530,
+    "sampleWord": "ಅಪ್ಪ",
+    "sampleWordMeaning": "Father"
+  },
+  {
+    "unicode": "U+E005",
+    "character": "್ಮ",
+    "name": "KANNADA SUBJOINED MA (MA-VATTU)",
+    "category": "ottakshara",
+    "defaultAdvanceWidth": 540,
+    "sampleWord": "ಅಮ್ಮ",
+    "sampleWordMeaning": "Mother"
+  },
+  {
+    "unicode": "U+E006",
+    "character": "್ಯ",
+    "name": "KANNADA SUBJOINED YA (YA-VATTU)",
+    "category": "ottakshara",
+    "defaultAdvanceWidth": 520,
+    "sampleWord": "ವಿದ್ಯಾ",
+    "sampleWordMeaning": "Education"
+  },
+  {
+    "unicode": "U+E007",
+    "character": "್ರ",
+    "name": "KANNADA SUBJOINED RA (RA-VATTU)",
+    "category": "ottakshara",
+    "defaultAdvanceWidth": 510,
+    "sampleWord": "ಚಂದ್ರ",
+    "sampleWordMeaning": "Moon"
+  },
+  {
+    "unicode": "U+E008",
+    "character": "್ಲ",
+    "name": "KANNADA SUBJOINED LA (LA-VATTU)",
+    "category": "ottakshara",
+    "defaultAdvanceWidth": 530,
+    "sampleWord": "ಎಲ್ಲ",
+    "sampleWordMeaning": "All"
+  },
+  {
+    "unicode": "U+E009",
+    "character": "್ವ",
+    "name": "KANNADA SUBJOINED VA (VA-VATTU)",
+    "category": "ottakshara",
+    "defaultAdvanceWidth": 520,
+    "sampleWord": "ಸರ್ವ",
+    "sampleWordMeaning": "Everything"
+  },
+  {
+    "unicode": "U+E00A",
+    "character": "್ಸ",
+    "name": "KANNADA SUBJOINED SA (SA-VATTU)",
+    "category": "ottakshara",
+    "defaultAdvanceWidth": 550,
+    "sampleWord": "ಧನುಸ್ಸು",
+    "sampleWordMeaning": "Bow"
   }
 ];
 
@@ -708,6 +874,9 @@ export const initialKannadaGlyphs: Record<string, import('../types/glyph').Glyph
       category: item.category,
       paths: [],
       advanceWidth: item.defaultAdvanceWidth,
+      leftSideBearing: item.defaultLsb ?? 50,
+      rightSideBearing: item.defaultRsb ?? 50,
+      status: 'empty',
       isEdited: false,
     };
     return acc;

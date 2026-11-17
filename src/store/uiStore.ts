@@ -42,14 +42,18 @@ interface UIStoreState {
 
   // Right Side Glyph Grid Filters
   categoryFilter: KannadaCategory | 'all';
+  statusFilter: 'all' | 'ready' | 'started' | 'empty';
   searchQuery: string;
   showOnlyEdited: boolean;
 
-  // Modal Visibility
+  // Modal & Drawer Visibility
   isExportModalOpen: boolean;
   isSettingsModalOpen: boolean;
   isHelpModalOpen: boolean;
   isShortcutsModalOpen: boolean;
+  isSpacingPanelOpen: boolean;
+  isComponentsDrawerOpen: boolean;
+  isOnboardingOpen: boolean;
 
   // Global Quick Toast
   toastMessage: string | null;
@@ -85,12 +89,19 @@ interface UIStoreState {
   setPan: (x: number, y: number) => void;
   resetPan: () => void;
   setCategoryFilter: (cat: KannadaCategory | 'all') => void;
+  setStatusFilter: (status: 'all' | 'ready' | 'started' | 'empty') => void;
   setSearchQuery: (q: string) => void;
   setShowOnlyEdited: (show: boolean) => void;
   setExportModalOpen: (open: boolean) => void;
   setSettingsModalOpen: (open: boolean) => void;
   setHelpModalOpen: (open: boolean) => void;
   setShortcutsModalOpen: (open: boolean) => void;
+  setSpacingPanelOpen: (open: boolean) => void;
+  setIsSpacingPanelOpen: (open: boolean) => void;
+  setComponentsDrawerOpen: (open: boolean) => void;
+  setIsComponentsDrawerOpen: (open: boolean) => void;
+  setOnboardingOpen: (open: boolean) => void;
+  setIsOnboardingOpen: (open: boolean) => void;
   showToast: (msg: string) => void;
   hideToast: () => void;
 }
@@ -121,6 +132,10 @@ export const useUIStore = create<UIStoreState>((set) => ({
     showCenterVertical: true,
     showAdvanceWidth: true,
     showGrid: true,
+    gridSize: 32,
+    snapToGrid: false,
+    snapToGuidelines: true,
+    showRulers: false,
   },
 
   // Tracing options: outline only, fill only, both, plus outline and fill sizes
@@ -141,6 +156,7 @@ export const useUIStore = create<UIStoreState>((set) => ({
   panY: 0,
 
   categoryFilter: 'all',
+  statusFilter: 'all',
   searchQuery: '',
   showOnlyEdited: false,
 
@@ -148,6 +164,9 @@ export const useUIStore = create<UIStoreState>((set) => ({
   isSettingsModalOpen: false,
   isHelpModalOpen: false,
   isShortcutsModalOpen: false,
+  isSpacingPanelOpen: false,
+  isComponentsDrawerOpen: false,
+  isOnboardingOpen: false,
   toastMessage: null,
   showToast: (msg: string) => {
     set({ toastMessage: msg });
@@ -206,10 +225,17 @@ export const useUIStore = create<UIStoreState>((set) => ({
   setPan: (panX, panY) => set({ panX, panY }),
   resetPan: () => set({ panX: 0, panY: 0 }),
   setCategoryFilter: (categoryFilter) => set({ categoryFilter }),
+  setStatusFilter: (statusFilter) => set({ statusFilter }),
   setSearchQuery: (searchQuery) => set({ searchQuery }),
   setShowOnlyEdited: (showOnlyEdited) => set({ showOnlyEdited }),
   setExportModalOpen: (isExportModalOpen) => set({ isExportModalOpen }),
   setSettingsModalOpen: (isSettingsModalOpen) => set({ isSettingsModalOpen }),
   setHelpModalOpen: (isHelpModalOpen) => set({ isHelpModalOpen, isShortcutsModalOpen: isHelpModalOpen }),
   setShortcutsModalOpen: (isShortcutsModalOpen) => set({ isShortcutsModalOpen, isHelpModalOpen: isShortcutsModalOpen }),
+  setSpacingPanelOpen: (isSpacingPanelOpen) => set({ isSpacingPanelOpen }),
+  setIsSpacingPanelOpen: (isSpacingPanelOpen) => set({ isSpacingPanelOpen }),
+  setComponentsDrawerOpen: (isComponentsDrawerOpen) => set({ isComponentsDrawerOpen }),
+  setIsComponentsDrawerOpen: (isComponentsDrawerOpen) => set({ isComponentsDrawerOpen }),
+  setOnboardingOpen: (isOnboardingOpen) => set({ isOnboardingOpen }),
+  setIsOnboardingOpen: (isOnboardingOpen) => set({ isOnboardingOpen }),
 }));

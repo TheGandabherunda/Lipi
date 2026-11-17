@@ -53,6 +53,16 @@ const SAMPLE_PRESETS = [
     text: 'ಅಕ್ಕ, ಅತ್ತೆ, ಅಣ್ಣ, ಅಪ್ಪ, ಅಮ್ಮ, ಶಕ್ತಿ, ವಿದ್ಯಾ, ಸೂರ್ಯ, ಕೃಷ್ಣ, ಪುಷ್ಪ, ಧನುಸ್ಸು, ರಾಷ್ಟ್ರ, ಸ್ನೇಹಿತ, ಜ್ಞಾನ',
   },
   {
+    category: 'Complex CTL',
+    label: 'ಸಂಯುಕ್ತಾಕ್ಷರ ಕೋಷ್ಟಕ (Conjunct Testing Matrix)',
+    text: 'ಕ್ಕ ಕ್ಖ ಕ್ಗ ಕ್ಘ ಕ್ತ ಕ್ನ ಕ್ಪ ಕ್ಮ ಕ್ಯ ಕ್ರ ಕ್ಲ ಕ್ವ ಕ್ಷ ಕ್ಳ ಷ್ಟ ರ್ಮ ತ್ಯ ಜ್ಞ ಶ್ರೀ ಪ್ರ ಸ್ವ ಮ್ಲ ಸ್ಥ ದ್ರ',
+  },
+  {
+    category: 'Complex CTL',
+    label: 'ಮಹಾಪ್ರಾformat ವ್ಯಂಜನ (Aspirate Contrast)',
+    text: 'ಕ ಖ, ಗ ಘ, ಚ ಛ, ಜ ಝ, ಟ ಠ, ಡ ಢ, ತ ಥ, ದ ಧ, ಪ ಫ, ಬ ಭ - ಧರ್ಮ, ಫಲ, ಭಕ್ತಿ, ಛಲ, ಘಂಟೆ',
+  },
+  {
     category: 'Vowel Signs',
     label: 'ಕ-ಗುಣಿತಾಕ್ಷರ (Ka Gunithakshara)',
     text: 'ಕ ಕಾ ಕಿ ಕೀ ಕು ಕೂ ಕೃ ಕೆ ಕೇ ಕೈ ಕೊ ಕೋ ಕೌ ಕಂ ಕಃ ಕ್',
@@ -159,6 +169,12 @@ const KEYPAD_CATEGORIES = {
     { char: 'ರ್ಕ', name: 'r-ka' },
     { char: 'ಕ್ಷ', name: 'ksha' },
     { char: 'ಜ್ಞ', name: 'jna' },
+    { char: 'ಶ್ರೀ', name: 'shree' },
+    { char: 'ತ್ಯ', name: 't-ya' },
+    { char: 'ರ್ಮ', name: 'r-ma' },
+    { char: 'ಪ್ರ', name: 'pra' },
+    { char: 'ಸ್ವ', name: 'swa' },
+    { char: 'ಸ್ಥ', name: 'stha' },
   ],
 };
 
@@ -427,6 +443,27 @@ export const FontPreviewModal: React.FC<FontPreviewModalProps> = ({ isOpen, onCl
               <X className="w-4 h-4" />
             </button>
           </div>
+        </div>
+
+        {/* Informational Sub-banner: Custom Drawn vs Reference Font */}
+        <div className="px-6 py-1.5 bg-indigo-50/50 border-b border-indigo-100/80 flex items-center justify-between text-xs text-indigo-900 shrink-0">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+            <span>
+              {editedCount > 0 ? (
+                <>
+                  <strong>{editedCount} Custom Glyph{editedCount === 1 ? '' : 's'}</strong> compiled into live preview. Remaining letters use reference fallback (<strong>{selectedFontDef.name}</strong>).
+                </>
+              ) : (
+                <>
+                  No custom glyphs drawn yet. Previewing with reference font (<strong>{selectedFontDef.name}</strong>). Draw letters on canvas to see custom curves here!
+                </>
+              )}
+            </span>
+          </div>
+          <span className="text-[11px] text-indigo-700 font-semibold hidden md:inline">
+            Kannada Complex Text Layout (CTL): Enabled
+          </span>
         </div>
 
         {/* 2. Single Unified Typographic Toolbar: Clean, perfectly fitting controls */}

@@ -12,8 +12,10 @@ const CATEGORY_TABS: { id: KannadaCategory | 'all'; labelKn: string; labelEn: st
   { id: 'swaragalu', labelKn: 'ಸ್ವರ', labelEn: 'Vowels' },
   { id: 'vyanjanagalu', labelKn: 'ವ್ಯಂಜನ', labelEn: 'Consonants' },
   { id: 'gunithakshara', labelKn: 'ಮಾತ್ರೆ', labelEn: 'Matras' },
+  { id: 'ottakshara', labelKn: 'ಒತ್ತಕ್ಷರ', labelEn: 'Conjuncts' },
   { id: 'numbers', labelKn: 'ಅಂಕಿ', labelEn: 'Digits' },
   { id: 'yogavahagalu', labelKn: 'ಯೋಗ', labelEn: 'Yogavaha' },
+  { id: 'symbols', labelKn: 'ಚಿಹ್ನೆ', labelEn: 'Symbols' },
 ];
 
 export const RightSideGlyphGrid: React.FC = React.memo(() => {
@@ -29,6 +31,8 @@ export const RightSideGlyphGrid: React.FC = React.memo(() => {
   const setSearchQuery = useUIStore((s) => s.setSearchQuery);
   const showOnlyEdited = useUIStore((s) => s.showOnlyEdited);
   const setShowOnlyEdited = useUIStore((s) => s.setShowOnlyEdited);
+  const statusFilter = useUIStore((s) => s.statusFilter);
+  const setStatusFilter = useUIStore((s) => s.setStatusFilter);
 
   const isDraggingSplitter = useRef(false);
   const startXRef = useRef(0);
@@ -53,12 +57,19 @@ export const RightSideGlyphGrid: React.FC = React.memo(() => {
       paths: [],
       advanceWidth: c.defaultAdvanceWidth,
       isEdited: false,
+      status: 'empty' as const,
     }).filter((glyph) => {
       if (categoryFilter !== 'all' && glyph.category !== categoryFilter) {
         return false;
       }
       if (showOnlyEdited && !glyph.isEdited) {
         return false;
+      }
+      if (statusFilter !== 'all') {
+        const effectiveStatus = glyph.status || (glyph.paths && glyph.paths.length > 0 ? 'started' : 'empty');
+        if (statusFilter === 'ready' && effectiveStatus !== 'ready') return false;
+        if (statusFilter === 'started' && effectiveStatus !== 'started') return false;
+        if (statusFilter === 'empty' && effectiveStatus !== 'empty') return false;
       }
       if (searchQuery) {
         const matchesChar = glyph.character.toLowerCase().includes(searchQuery);
@@ -70,10 +81,23 @@ export const RightSideGlyphGrid: React.FC = React.memo(() => {
       }
       return true;
     });
-  }, [glyphs, categoryFilter, showOnlyEdited, searchQuery]);
+  }, [glyphs, categoryFilter, showOnlyEdited, statusFilter, searchQuery]);
 
-  const editedCount = useMemo(() => {
-    return Object.values(glyphs).filter((g) => g.isEdited).length;
+  const { readyCount, startedCount, emptyCount, editedCount } = useMemo(() => {
+    let ready = 0;
+    let started = 0;
+    let empty = 0;
+    let edited = 0;
+    KANNADA_CHARACTERS_LIST.forEach((c) => {
+      const g = glyphs[c.unicode];
+      const hasPaths = Boolean(g?.paths && g.paths.length > 0);
+      if (g?.isEdited || hasPaths) edited++;
+      const status = g?.status || (hasPaths ? 'started' : 'empty');
+      if (status === 'ready') ready++;
+      else if (status === 'started') started++;
+      else empty++;
+    });
+    return { readyCount: ready, startedCount: started, emptyCount: empty, editedCount: edited };
   }, [glyphs]);
 
   // Handle Dragging Splitter to resize sidebar
@@ -150,6 +174,64 @@ export const RightSideGlyphGrid: React.FC = React.memo(() => {
               </button>
             );
           })}
+        </div>
+
+        {/* Status Filter Row */}
+        <div className="flex items-center gap-1 overflow-x-auto pb-0.5 scrollbar-thin">
+          <button
+            type="button"
+            onClick={() => setStatusFilter('all')}
+            className={clsx(
+              'px-2 py-0.5 rounded-md text-[10px] font-medium transition-all cursor-pointer shrink-0 border',
+              statusFilter === 'all'
+                ? 'bg-slate-800 text-white border-slate-800 font-bold'
+                : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+            )}
+          >
+            All ({KANNADA_CHARACTERS_LIST.length})
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setStatusFilter('ready')}
+            className={clsx(
+              'px-2 py-0.5 rounded-md text-[10px] font-medium transition-all cursor-pointer shrink-0 border flex items-center gap-1',
+              statusFilter === 'ready'
+                ? 'bg-emerald-600 text-white border-emerald-600 font-bold'
+                : 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+            )}
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+            <span>Ready ({readyCount})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setStatusFilter('started')}
+            className={clsx(
+              'px-2 py-0.5 rounded-md text-[10px] font-medium transition-all cursor-pointer shrink-0 border flex items-center gap-1',
+              statusFilter === 'started'
+                ? 'bg-indigo-600 text-white border-indigo-600 font-bold'
+                : 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'
+            )}
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+            <span>Started ({startedCount})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setStatusFilter('empty')}
+            className={clsx(
+              'px-2 py-0.5 rounded-md text-[10px] font-medium transition-all cursor-pointer shrink-0 border flex items-center gap-1',
+              statusFilter === 'empty'
+                ? 'bg-slate-600 text-white border-slate-600 font-bold'
+                : 'bg-slate-100 border-slate-200 text-slate-500 hover:bg-slate-200'
+            )}
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+            <span>Empty ({emptyCount})</span>
+          </button>
         </div>
 
         {/* Below filter chips: show 0/78 drawn count & Edited Only filter */}

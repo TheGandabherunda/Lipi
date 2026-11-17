@@ -21,14 +21,20 @@ export interface LipiProjectMetadata {
   weightClass?: number;        // e.g. 100, 300, 400, 500, 600, 700, 800, 900
   weightName?: string;         // e.g. "Thin", "Light", "Regular", "Medium", "Bold", "Black"
   styleName?: string;          // e.g. "Regular", "Bold"
+  designerUrl?: string;        // Portfolio or foundry website
+  license?: string;            // e.g. "SIL Open Font License 1.1"
+  description?: string;        // Notes on font style, history, intended use
+  copyright?: string;          // Copyright notice
+  postscriptName?: string;     // ASCII PostScript name (e.g. "LipiKannada-Regular")
 }
 
 export interface LipiFileSchema {
   format: 'LIPI_PROJECT';
-  schemaVersion: '1.0.0' | '1.1.0' | string;
+  schemaVersion: '1.0.0' | '1.1.0' | '2.0.0' | string;
   metadata: LipiProjectMetadata;
   glyphs: Record<string, GlyphData>; // Keyed by Unicode string e.g. "U+0C95"
   weightProfiles?: Record<number, Record<string, GlyphData>>;
   glyphHistories?: Record<string, { stack: import('./glyph').VectorPathData[][]; index: number }>;
+  components?: import('./glyph').FontComponent[];
   customProperties?: Record<string, any>; // Preserves unsupported or user-defined fields safely
 }

@@ -140,7 +140,7 @@ export function renderCanvasGuidelines(
   if (config.showGrid) {
     ctx.strokeStyle = 'rgba(100, 116, 139, 0.07)';
     ctx.lineWidth = 1;
-    const gridSize = Math.round(width / 24);
+    const gridSize = config.gridSize || Math.round(width / 24);
     ctx.beginPath();
     for (let x = 0; x < width; x += gridSize) {
       ctx.moveTo(x, 0);

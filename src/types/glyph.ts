@@ -3,8 +3,12 @@ export type KannadaCategory =
   | 'yogavahagalu'    // ಯೋಗವಾಹಗಳು (ಅಂ, ಅಃ)
   | 'vyanjanagalu'    // ವ್ಯಂಜನಗಳು (ಕ, ಖ, ಗ, ಘ, ಙ, ಚ... ಳ)
   | 'gunithakshara'   // ಗುಣಿತಾಕ್ಷರ ಚಿಹ್ನೆಗಳು / ಮಾತ್ರೆಗಳು (ಾ, ಿ, ೀ, ು, ೂ, ೃ, ೆ, ೇ, ೈ, ೊ, ೋ, ೌ, ್)
+  | 'ottakshara'      // ಒತ್ತಕ್ಷರಗಳು / Subjoined forms (್ಕ, ್ತ, ್ಮ, ಇತ್ಯಾದಿ)
   | 'numbers'         // ಅಂಕಿಗಳು (೦, ೧, ೨, ೩, ೪, ೫, ೬, ೭, ೮, ೯)
-  | 'modifiers';      // ಒತ್ತುಗಳು / Ottakshara signs, avagraha, etc.
+  | 'modifiers'       // ಒತ್ತುಗಳು / Ottakshara signs, avagraha, etc.
+  | 'symbols';        // Kannada symbols & punctuation
+
+export type GlyphStatus = 'empty' | 'started' | 'ready';
 
 export interface VectorPathData {
   id: string;
@@ -26,6 +30,9 @@ export interface GlyphData {
   sampleWordMeaning?: string;       // e.g. "Mother"
   paths: VectorPathData[];          // Vector strokes drawn
   advanceWidth: number;             // Metric width for the character
+  leftSideBearing?: number;         // Left side bearing in font units (defaults to metrics.leftSideBearing)
+  rightSideBearing?: number;        // Right side bearing in font units (defaults to metrics.rightSideBearing)
+  status?: GlyphStatus;             // 'empty' | 'started' | 'ready'
   isEdited: boolean;                // Visual flag for the grid
   lastModified?: number;
 }
@@ -36,6 +43,51 @@ export interface KannadaCharacterDefinition {
   name: string;
   category: KannadaCategory;
   defaultAdvanceWidth: number;
+  defaultLsb?: number;
+  defaultRsb?: number;
   sampleWord?: string;
   sampleWordMeaning?: string;
+}
+
+export interface FontComponent {
+  id: string;
+  name: string;
+  nameKn: string;
+  category: 'talekattu' | 'kombu' | 'gudisu' | 'virama' | 'vattrisuli' | 'loop' | 'custom';
+  paths: VectorPathData[];
+  defaultWidth: number;
+  defaultHeight: number;
+  description?: string;
+  sourceGlyph?: string;
+}
+
+export type QASeverity = 'error' | 'warning' | 'info';
+
+export interface GlyphQAIssue {
+  glyphUnicode: string;
+  glyphCharacter: string;
+  type:
+    | 'empty'
+    | 'open_contour'
+    | 'invalid_metric'
+    | 'zero_advance'
+    | 'overflow_bearing'
+    | 'invalid_path'
+    | 'metadata';
+  severity: QASeverity;
+  message: string;
+  suggestion?: string;
+}
+
+export interface ProjectQAReport {
+  timestamp: number;
+  totalGlyphs: number;
+  readyGlyphsCount: number;
+  startedGlyphsCount: number;
+  emptyGlyphsCount: number;
+  issues: GlyphQAIssue[];
+  errorCount: number;
+  warningCount: number;
+  infoCount: number;
+  canExport: boolean;
 }
