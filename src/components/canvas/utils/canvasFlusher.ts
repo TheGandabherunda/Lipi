@@ -1,5 +1,6 @@
 import type { Canvas } from 'fabric';
 import { useGlyphStore } from '../../../store/glyphStore';
+import { useUIStore } from '../../../store/uiStore';
 import { serializeCanvasPaths } from './canvasSerialization';
 import { finalizeBrushStroke, hasActiveBrushStroke } from './fabricBrushAdapter';
 import type { PenNode } from '../../../utils/strokeTools';
@@ -61,9 +62,17 @@ export function flushEditorCanvasToGlyph(ctx: EditorFlushContext): void {
     ctx.hoveredSegmentRef.current = null;
     ctx.isMouseDownRef.current = false;
 
-    // 4. Discard active object so any active selection transforms are baked into path coordinates
+    // 4. Finalize any active selection transform and discard active object
+    if ((canvas as any)._currentTransform) {
+      try {
+        const evt = typeof MouseEvent !== 'undefined' ? new MouseEvent('mouseup') : ({ type: 'mouseup' } as any);
+        (canvas as any)._onMouseUp?.(evt);
+      } catch {}
+      (canvas as any)._currentTransform = null;
+    }
     canvas.discardActiveObject();
     ctx.clearNodeEditing();
+    useUIStore.getState().setSelectedObjectAngle(null);
 
     // 5. Clear any pending debounce timer
     if (ctx.debounceTimerRef.current) {

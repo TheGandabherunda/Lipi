@@ -26,6 +26,9 @@ class MockFabricCanvas {
   getActiveObject() {
     return this.activeObject;
   }
+  discardActiveObject() {
+    this.activeObject = null;
+  }
   forEachObject(cb: (obj: any) => void) {
     this.objects.forEach(cb);
   }
@@ -154,5 +157,62 @@ describe('Canvas Interaction Mode Centralization', () => {
     expect(canvas.hoverCursor).toBe('pointer');
     expect(obj1.selectable).toBe(false);
     expect(obj1.evented).toBe(true);
+  });
+
+  it('maintains strict isolation and prevents object mutation when tool is changed while Space is held', () => {
+    canvas.activeObject = obj1;
+
+    // 1. User holds Space in select tool
+    applyCanvasInteractionMode(canvas as unknown as FabricCanvas, {
+      activeTool: 'select',
+      isSpaceHeld: true,
+      isPanning: false,
+    });
+
+    expect(canvas.selection).toBe(false);
+    expect(obj1.selectable).toBe(false);
+    expect(obj1.evented).toBe(false);
+
+    // 2. User switches tool to 'brush' while Space is still held
+    applyCanvasInteractionMode(canvas as unknown as FabricCanvas, {
+      activeTool: 'brush',
+      isSpaceHeld: true,
+      isPanning: false,
+    });
+
+    // Must STILL be in Pan mode (drawingMode false, objects locked, cursor grab)
+    expect(canvas.selection).toBe(false);
+    expect(canvas.isDrawingMode).toBe(false);
+    expect(canvas.defaultCursor).toBe('grab');
+    expect(obj1.selectable).toBe(false);
+
+    // 3. User releases Space
+    applyCanvasInteractionMode(canvas as unknown as FabricCanvas, {
+      activeTool: 'brush',
+      isSpaceHeld: false,
+      isPanning: false,
+    });
+
+    // Now enters brush mode
+    expect(canvas.isDrawingMode).toBe(true);
+    expect(canvas.defaultCursor).toBe('none');
+    expect(canvas.activeObject).toBeNull();
+  });
+
+  it('clears canvas._currentTransform when Space pan activates to prevent dragged transform mutation', () => {
+    let mouseUpFired = false;
+    (canvas as any)._onMouseUp = () => {
+      mouseUpFired = true;
+    };
+    (canvas as any)._currentTransform = { target: obj1, action: 'scale' };
+
+    applyCanvasInteractionMode(canvas as unknown as FabricCanvas, {
+      activeTool: 'select',
+      isSpaceHeld: true,
+      isPanning: false,
+    });
+
+    expect(mouseUpFired).toBe(true);
+    expect((canvas as any)._currentTransform).toBeNull();
   });
 });

@@ -69,15 +69,13 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
 
   // Global Pointer Move and Up for Panning
   const stopPan = useCallback(() => {
-    if (isPanningRef.current) {
-      isPanningRef.current = false;
-      setIsPanning(false);
-      applyCanvasInteractionMode(fabricCanvasRef.current, {
-        activeTool: useUIStore.getState().activeTool,
-        isSpaceHeld: isSpacePressedRef.current,
-        isPanning: false,
-      });
-    }
+    isPanningRef.current = false;
+    setIsPanning(false);
+    applyCanvasInteractionMode(fabricCanvasRef.current, {
+      activeTool: useUIStore.getState().activeTool,
+      isSpaceHeld: isSpacePressedRef.current,
+      isPanning: false,
+    });
   }, [fabricCanvasRef]);
 
   const startPan = useCallback(
@@ -143,11 +141,7 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
       if (e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar') {
         isSpacePressedRef.current = false;
         setIsSpaceHeld(false);
-        applyCanvasInteractionMode(fabricCanvasRef.current, {
-          activeTool: useUIStore.getState().activeTool,
-          isSpaceHeld: false,
-          isPanning: false,
-        });
+        stopPan();
         return;
       }
 
@@ -161,11 +155,6 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
       isSpacePressedRef.current = false;
       setIsSpaceHeld(false);
       stopPan();
-      applyCanvasInteractionMode(fabricCanvasRef.current, {
-        activeTool: useUIStore.getState().activeTool,
-        isSpaceHeld: false,
-        isPanning: false,
-      });
     };
 
     window.addEventListener('keydown', handleKeyDown);

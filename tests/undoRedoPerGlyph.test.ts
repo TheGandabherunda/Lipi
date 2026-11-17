@@ -134,4 +134,39 @@ describe('Phase 1: Per-Glyph Independent Undo / Redo System', () => {
     const historySnapshot = historyStack[historyStack.length - 1][0];
     expect(historySnapshot.strokeWidth).toBe(16);
   });
+
+  it('preserves redo availability across glyph switching when no new edits were made', () => {
+    useGlyphStore.getState().setActiveUnicode('U+0C85');
+
+    const s1: VectorPathData = { id: 's1', pathString: 'M 10 10 L 20 20', strokeWidth: 16, strokeColor: '#000' };
+    const s2: VectorPathData = { id: 's2', pathString: 'M 30 30 L 40 40', strokeWidth: 16, strokeColor: '#000' };
+    useGlyphStore.getState().updateActiveGlyphPaths([s1]);
+    useGlyphStore.getState().updateActiveGlyphPaths([s1, s2]);
+
+    // Undo on A -> currently on [s1], can redo to [s1, s2]
+    useGlyphStore.getState().undo();
+    expect(useGlyphStore.getState().canRedo()).toBe(true);
+
+    // Switch to glyph B without making edits on A
+    useGlyphStore.getState().setActiveUnicode('U+0C86');
+    expect(useGlyphStore.getState().canRedo()).toBe(false);
+
+    // Draw on B
+    const sB: VectorPathData = { id: 'sb', pathString: 'M 100 100 L 200 200', strokeWidth: 16, strokeColor: '#000' };
+    useGlyphStore.getState().updateActiveGlyphPaths([sB]);
+    expect(useGlyphStore.getState().glyphs['U+0C86'].paths.length).toBe(1);
+
+    // Switch back to A
+    useGlyphStore.getState().setActiveUnicode('U+0C85');
+    // A must still be able to redo to [s1, s2]!
+    expect(useGlyphStore.getState().canRedo()).toBe(true);
+    useGlyphStore.getState().redo();
+    expect(useGlyphStore.getState().glyphs['U+0C85'].paths.length).toBe(2);
+    expect(useGlyphStore.getState().glyphs['U+0C85'].paths[1].id).toBe('s2');
+
+    // Switch to B: B's stroke is preserved
+    useGlyphStore.getState().setActiveUnicode('U+0C86');
+    expect(useGlyphStore.getState().glyphs['U+0C86'].paths.length).toBe(1);
+    expect(useGlyphStore.getState().glyphs['U+0C86'].paths[0].id).toBe('sb');
+  });
 });

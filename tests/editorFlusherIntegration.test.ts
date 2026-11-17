@@ -280,4 +280,68 @@ describe('Editor Canvas Flusher & Active Tool Transition Integration', () => {
     const glyphB = useGlyphStore.getState().glyphs['U+0C86'];
     expect(glyphB.paths.length).toBe(0);
   });
+
+  it('clears active selection and resets selectedObjectAngle on glyph change', () => {
+    useGlyphStore.getState().setActiveUnicode('U+0C85');
+    const path = new Path('M 10 10 L 50 50', { stroke: '#000', strokeWidth: 10 });
+    canvas.add(path);
+    canvas.setActiveObject(path);
+    useUIStore.getState().setSelectedObjectAngle(45);
+
+    expect(canvas.getActiveObject()).not.toBeNull();
+    expect(useUIStore.getState().selectedObjectAngle).toBe(45);
+
+    // Switch to glyph B
+    useGlyphStore.getState().setActiveUnicode('U+0C86');
+
+    // Selection must be discarded and angle reset
+    expect(canvas.getActiveObjects().length).toBe(0);
+    expect(canvas.getActiveObject()).toBeNull();
+    expect(useUIStore.getState().selectedObjectAngle).toBeNull();
+  });
+
+  it('safely finalizes canvas._currentTransform if present when flusher runs on glyph switch', () => {
+    useGlyphStore.getState().setActiveUnicode('U+0C85');
+    const path = new Path('M 10 10 L 50 50', { stroke: '#000', strokeWidth: 10 });
+    canvas.add(path);
+    canvas.setActiveObject(path);
+
+    let mouseUpCalled = false;
+    (canvas as any)._onMouseUp = () => {
+      mouseUpCalled = true;
+    };
+    (canvas as any)._currentTransform = { target: path, action: 'drag' };
+
+    // Switch glyphs
+    useGlyphStore.getState().setActiveUnicode('U+0C86');
+
+    expect(mouseUpCalled).toBe(true);
+    expect((canvas as any)._currentTransform).toBeNull();
+    expect(canvas.getActiveObjects().length).toBe(0);
+  });
+
+  it('does not write stale canvas data to new project when project is reset or loaded during active interaction', () => {
+    useGlyphStore.getState().setActiveUnicode('U+0C85');
+    const path = new Path('M 10 10 L 50 50', { stroke: '#000', strokeWidth: 10 });
+    canvas.add(path);
+
+    // Simulate in-progress brush stroke and active angle
+    canvas.freeDrawingBrush._points = [{ x: 5, y: 5 }, { x: 50, y: 50 }];
+    useUIStore.getState().setSelectedObjectAngle(35);
+    const initialRev = useGlyphStore.getState().projectRevision;
+
+    // Reset project while interaction was active
+    useGlyphStore.getState().resetProject('Clean-Project');
+
+    expect(useGlyphStore.getState().projectRevision).toBe(initialRev + 1);
+    expect(useGlyphStore.getState().metadata.name).toBe('Clean-Project');
+
+    // New project glyphs must have zero paths
+    const newGlyphA = useGlyphStore.getState().glyphs['U+0C85'];
+    expect(newGlyphA.paths.length).toBe(0);
+
+    // History must be clean
+    expect(useGlyphStore.getState().glyphHistories['U+0C85'].stack).toEqual([[]]);
+    expect(useGlyphStore.getState().historyIndex).toBe(0);
+  });
 });

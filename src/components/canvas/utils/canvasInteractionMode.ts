@@ -31,6 +31,15 @@ export function applyCanvasInteractionMode(
     canvas.selection = false;
     canvas.isDrawingMode = false;
 
+    // If a selection transform was in progress, safely finalize or abort it so pan drags do not mutate objects
+    if ((canvas as any)._currentTransform) {
+      try {
+        const evt = typeof MouseEvent !== 'undefined' ? new MouseEvent('mouseup') : ({ type: 'mouseup' } as any);
+        (canvas as any)._onMouseUp?.(evt);
+      } catch {}
+      (canvas as any)._currentTransform = null;
+    }
+
     const panCursor = isPanning ? 'grabbing' : 'grab';
     canvas.defaultCursor = panCursor;
     canvas.hoverCursor = panCursor;
@@ -55,6 +64,10 @@ export function applyCanvasInteractionMode(
   }
 
   // 2. Normal Tool Interaction Modes
+  if (activeTool !== 'select' && typeof canvas.discardActiveObject === 'function') {
+    canvas.discardActiveObject();
+  }
+
   switch (activeTool) {
     case 'select': {
       canvas.isDrawingMode = false;

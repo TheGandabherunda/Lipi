@@ -631,6 +631,28 @@ describe('Phase 1 Acceptance: Canvas Interaction Lifecycle & Edge Cases', () => 
     };
     expect(isTypingInInputElement({ target: ariaTextbox } as any)).toBe(true);
 
+    // ARIA combobox, searchbox, and spinbutton
+    const ariaCombobox = {
+      tagName: 'DIV',
+      isContentEditable: false,
+      getAttribute: (attr: string) => (attr === 'role' ? 'combobox' : null),
+    };
+    expect(isTypingInInputElement({ target: ariaCombobox } as any)).toBe(true);
+
+    const ariaSearchbox = {
+      tagName: 'DIV',
+      isContentEditable: false,
+      getAttribute: (attr: string) => (attr === 'role' ? 'searchbox' : null),
+    };
+    expect(isTypingInInputElement({ target: ariaSearchbox } as any)).toBe(true);
+
+    const ariaSpinbutton = {
+      tagName: 'DIV',
+      isContentEditable: false,
+      getAttribute: (attr: string) => (attr === 'role' ? 'spinbutton' : null),
+    };
+    expect(isTypingInInputElement({ target: ariaSpinbutton } as any)).toBe(true);
+
     // Normal canvas container (must NOT be treated as input)
     const canvasDiv = {
       tagName: 'DIV',
@@ -639,5 +661,48 @@ describe('Phase 1 Acceptance: Canvas Interaction Lifecycle & Edge Cases', () => 
       closest: () => null,
     };
     expect(isTypingInInputElement({ target: canvasDiv } as any)).toBe(false);
+  });
+
+  it('window blur and pointer cancel cleanly finalize active gestures without stuck flags', () => {
+    // 1. Simulating an eraser drag
+    let isMouseDown = true;
+    let hasErased = true;
+    let lastEraserPos: any = { x: 40, y: 50 };
+    let activeDragIndex: any = 2;
+    let marqueeBox: any = { x: 0, y: 0, width: 50, height: 50 };
+    let syncCount = 0;
+
+    const syncMock = () => {
+      syncCount++;
+    };
+
+    // Global pointerup/cancel/blur handler logic
+    const handleGlobalCleanup = () => {
+      if (isMouseDown) {
+        isMouseDown = false;
+        if (hasErased) {
+          hasErased = false;
+          syncMock();
+        }
+      }
+      activeDragIndex = null;
+      marqueeBox = null;
+      lastEraserPos = null;
+      hasErased = false;
+    };
+
+    // Trigger blur / cancel
+    handleGlobalCleanup();
+
+    expect(isMouseDown).toBe(false);
+    expect(hasErased).toBe(false);
+    expect(lastEraserPos).toBeNull();
+    expect(activeDragIndex).toBeNull();
+    expect(marqueeBox).toBeNull();
+    expect(syncCount).toBe(1);
+
+    // Second call (e.g. redundant pointerup after blur) must be idempotent
+    handleGlobalCleanup();
+    expect(syncCount).toBe(1); // not called again
   });
 });

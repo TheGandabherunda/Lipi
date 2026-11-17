@@ -53,6 +53,7 @@ interface GlyphStoreState {
   canRedo: (unicode?: string) => boolean;
 
   // Project Actions
+  projectRevision: number;
   updateMetadata: (patch: Partial<LipiProjectMetadata>) => void;
   resetProject: (name?: string) => void;
 
@@ -176,6 +177,7 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
   glyphHistories: initialHistories,
   history: [[]],
   historyIndex: 0,
+  projectRevision: 0,
   clipboard: null,
 
   copyPaths: (paths?: VectorPathData[]) => {
@@ -673,6 +675,7 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
       glyphHistories: freshHistories,
       history: [[]],
       historyIndex: 0,
+      projectRevision: (get().projectRevision || 0) + 1,
     });
 
     if (typeof window !== 'undefined') {
@@ -887,6 +890,7 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
         glyphHistories: restoredHistories,
         history: activeHistory.stack.map((entry) => cloneVectorPaths(entry)),
         historyIndex: activeHistory.index,
+        projectRevision: (get().projectRevision || 0) + 1,
       });
 
       if (typeof window !== 'undefined') {
