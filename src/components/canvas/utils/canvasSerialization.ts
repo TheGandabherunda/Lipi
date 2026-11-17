@@ -26,8 +26,9 @@ export function serializeFabricPathObject(obj: any, idx = 0): VectorPathData | n
   // Compute geometric scale factor to preserve visible stroke weight on scale transforms
   const scaleFactor = (Math.hypot(mat[0], mat[1]) + Math.hypot(mat[2], mat[3])) / 2;
   const rawStrokeWidth = (obj.strokeWidth as number) || 16;
+  const isStrokeUniform = (obj as any).strokeUniform ?? false;
   const effectiveStrokeWidth =
-    hasTransform && Math.abs(scaleFactor - 1) > 0.001
+    hasTransform && !isStrokeUniform && Math.abs(scaleFactor - 1) > 0.001
       ? Math.max(1, Math.round(rawStrokeWidth * scaleFactor * 10) / 10)
       : rawStrokeWidth;
 
@@ -144,6 +145,7 @@ export function rehydrateFabricPath(
       fill: effectiveFill,
       strokeLineCap: p.strokeLineCap || 'round',
       strokeLineJoin: p.strokeLineJoin || 'round',
+      strokeUniform: true,
       selectable: options?.selectable ?? true,
       evented: true,
     });

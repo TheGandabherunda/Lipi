@@ -158,6 +158,13 @@ for (const code of Object.keys(initialClonedGlyphs)) {
   initialHistories[code] = { stack: [[]], index: 0 };
 }
 
+export type CanvasFlusher = (targetUnicode: string) => void;
+let registeredCanvasFlusher: CanvasFlusher | null = null;
+
+export function registerCanvasFlusher(flusher: CanvasFlusher | null) {
+  registeredCanvasFlusher = flusher;
+}
+
 export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
   metadata: DEFAULT_METADATA,
   glyphs: initialClonedGlyphs,
@@ -320,12 +327,24 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
   },
 
   setActiveUnicode: (unicode: string) => {
-    const { glyphs, glyphHistories } = get();
-    const targetGlyph = glyphs[unicode];
+    const { activeUnicode } = get();
+    if (unicode === activeUnicode) return;
+
+    // 1. Flush outgoing glyph before switching activeUnicode
+    if (registeredCanvasFlusher) {
+      try {
+        registeredCanvasFlusher(activeUnicode);
+      } catch (err) {
+        console.warn('Failed to flush outgoing glyph before switch:', err);
+      }
+    }
+
+    const refreshedState = get();
+    const targetGlyph = refreshedState.glyphs[unicode];
     if (!targetGlyph) return;
 
     // Retrieve or initialize the per-glyph history stack for this specific character
-    let targetHistory = glyphHistories[unicode];
+    let targetHistory = refreshedState.glyphHistories[unicode];
     if (!targetHistory || !targetHistory.stack || targetHistory.stack.length === 0) {
       targetHistory = {
         stack: [cloneVectorPaths(targetGlyph.paths || [])],
@@ -336,7 +355,7 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
     set({
       activeUnicode: unicode,
       glyphHistories: {
-        ...glyphHistories,
+        ...refreshedState.glyphHistories,
         [unicode]: targetHistory,
       },
       history: targetHistory.stack.map((entry) => cloneVectorPaths(entry)),

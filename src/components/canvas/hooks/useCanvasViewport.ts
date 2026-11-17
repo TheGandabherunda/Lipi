@@ -64,9 +64,32 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
     window.addEventListener('mouseup', handleMouseUp);
   }, [canvasWidth, canvasHeight, zoom, setCanvasSize]);
 
-  // Global Mouse Move and Up for Panning
+  // Global Pointer / Mouse Move and Up for Panning
+  const stopPan = useCallback(() => {
+    if (isPanningRef.current) {
+      isPanningRef.current = false;
+      setIsPanning(false);
+      const canvas = fabricCanvasRef.current;
+      if (canvas) {
+        const currentTool = useUIStore.getState().activeTool;
+        canvas.selection = currentTool === 'select' && !isSpacePressedRef.current;
+        if (canvas.upperCanvasEl) {
+          canvas.upperCanvasEl.style.cursor = isSpacePressedRef.current
+            ? 'grab'
+            : currentTool === 'pan'
+            ? 'grab'
+            : currentTool === 'brush' || currentTool === 'eraser'
+            ? 'none'
+            : currentTool === 'pen'
+            ? 'crosshair'
+            : 'default';
+        }
+      }
+    }
+  }, [activeTool, fabricCanvasRef]);
+
   useEffect(() => {
-    const handleGlobalMouseMove = (e: MouseEvent) => {
+    const handleGlobalPointerMove = (e: MouseEvent | PointerEvent) => {
       if (isPanningRef.current) {
         const nx = e.clientX - panStartPosRef.current.x;
         const ny = e.clientY - panStartPosRef.current.y;
@@ -74,36 +97,24 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
       }
     };
 
-    const handleGlobalMouseUp = () => {
-      if (isPanningRef.current) {
-        isPanningRef.current = false;
-        setIsPanning(false);
-        const canvas = fabricCanvasRef.current;
-        if (canvas) {
-          canvas.selection = activeTool === 'select';
-          if (canvas.upperCanvasEl) {
-            canvas.upperCanvasEl.style.cursor = isSpacePressedRef.current
-              ? 'grab'
-              : activeTool === 'pan'
-              ? 'grab'
-              : activeTool === 'brush' || activeTool === 'eraser'
-              ? 'none'
-              : activeTool === 'pen'
-              ? 'crosshair'
-              : 'default';
-          }
-        }
-      }
+    const handleGlobalPointerUp = () => {
+      stopPan();
     };
 
-    window.addEventListener('mousemove', handleGlobalMouseMove);
-    window.addEventListener('mouseup', handleGlobalMouseUp);
+    window.addEventListener('pointermove', handleGlobalPointerMove);
+    window.addEventListener('pointerup', handleGlobalPointerUp);
+    window.addEventListener('pointercancel', handleGlobalPointerUp);
+    window.addEventListener('mousemove', handleGlobalPointerMove);
+    window.addEventListener('mouseup', handleGlobalPointerUp);
 
     return () => {
-      window.removeEventListener('mousemove', handleGlobalMouseMove);
-      window.removeEventListener('mouseup', handleGlobalMouseUp);
+      window.removeEventListener('pointermove', handleGlobalPointerMove);
+      window.removeEventListener('pointerup', handleGlobalPointerUp);
+      window.removeEventListener('pointercancel', handleGlobalPointerUp);
+      window.removeEventListener('mousemove', handleGlobalPointerMove);
+      window.removeEventListener('mouseup', handleGlobalPointerUp);
     };
-  }, [activeTool, fabricCanvasRef, setPan]);
+  }, [setPan, stopPan]);
 
   // Spacebar Handlers for Panning & Window Blur Safety
   useEffect(() => {
@@ -112,7 +123,7 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
         return;
       }
 
-      if (e.code === 'Space' && !e.repeat && !isSpacePressedRef.current) {
+      if ((e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar') && !e.repeat && !isSpacePressedRef.current) {
         e.preventDefault();
         isSpacePressedRef.current = true;
         setIsSpaceHeld(true);
@@ -133,11 +144,8 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (isTypingInInputElement(e)) {
-        return;
-      }
-
-      if (e.code === 'Space') {
+      // Space key release must ALWAYS be processed, even if focus moved into an input element
+      if (e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar') {
         isSpacePressedRef.current = false;
         setIsSpaceHeld(false);
         const canvas = fabricCanvasRef.current;
@@ -160,6 +168,11 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
                 : 'default';
           }
         }
+        return;
+      }
+
+      if (isTypingInInputElement(e)) {
+        return;
       }
     };
 
@@ -167,10 +180,7 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
     const handleWindowBlur = () => {
       isSpacePressedRef.current = false;
       setIsSpaceHeld(false);
-      if (isPanningRef.current) {
-        isPanningRef.current = false;
-        setIsPanning(false);
-      }
+      stopPan();
       const canvas = fabricCanvasRef.current;
       if (canvas) {
         const currentTool = useUIStore.getState().activeTool;
@@ -192,7 +202,7 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('blur', handleWindowBlur);
     };
-  }, [activeTool, fabricCanvasRef]);
+  }, [activeTool, fabricCanvasRef, stopPan]);
 
   // Mouse Wheel Zoom
   useEffect(() => {
@@ -234,9 +244,9 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
     [fabricCanvasRef]
   );
 
-  // Workspace Mouse Down Handler
+  // Workspace Mouse / Pointer Down Handler
   const handleWorkspaceMouseDown = useCallback(
-    (e: React.MouseEvent) => {
+    (e: React.MouseEvent | React.PointerEvent) => {
       if (e.button === 1 || isSpacePressedRef.current || activeTool === 'pan') {
         e.preventDefault();
         startPan(e.clientX, e.clientY);
@@ -251,6 +261,7 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
     isPanning,
     isPanningRef,
     startPan,
+    stopPan,
     handleResizeMouseDown,
     handleWorkspaceMouseDown,
   };

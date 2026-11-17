@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useCallback, useMemo, useState } from 'react';
 import { Canvas, PencilBrush, Path, ActiveSelection, type FabricObject } from 'fabric';
-import { useGlyphStore } from '../../store/glyphStore';
+import { useGlyphStore, registerCanvasFlusher } from '../../store/glyphStore';
 import { useUIStore } from '../../store/uiStore';
 import { calculateGuidelinePositions, renderCanvasGuidelines } from './CanvasGuidelines';
 import type { VectorPathData } from '../../types/glyph';
@@ -451,12 +451,18 @@ export const CanvasEditor: React.FC = React.memo(() => {
     isPanning,
     isPanningRef,
     startPan,
+    stopPan,
     handleResizeMouseDown,
     handleWorkspaceMouseDown,
   } = useCanvasViewport({
     containerRef,
     fabricCanvasRef,
   });
+
+  const stopPanRef = useRef<() => void>(stopPan);
+  useEffect(() => {
+    stopPanRef.current = stopPan;
+  }, [stopPan]);
 
   // Global canvas clipboard actions (Copy, Paste, Cut, Duplicate)
   const { handleCopy, handlePaste, handleCut, handleDuplicate } = useCanvasClipboard({
@@ -552,11 +558,11 @@ export const CanvasEditor: React.FC = React.memo(() => {
 
   // Commits the currently drawn Pen path to the canvas
   const commitPenPath = useCallback(
-    (isClosed = false) => {
+    (isClosed = false, syncToStore = true) => {
       const canvas = fabricCanvasRef.current;
       if (!canvas) return;
 
-      if (penNodesRef.current.length >= 2) {
+      if (penNodesRef.current.length >= 1) {
         const svg = penNodesToSVGPath(penNodesRef.current, isClosed, penMode);
         if (svg) {
           try {
@@ -566,12 +572,15 @@ export const CanvasEditor: React.FC = React.memo(() => {
               fill: isClosed && fillColor !== 'transparent' ? fillColor : undefined,
               strokeLineCap: strokeCap,
               strokeLineJoin: penMode === 'sharp' ? 'miter' : strokeJoin,
+              strokeUniform: true,
               selectable: activeTool === 'select',
               evented: true,
             });
             canvas.add(pathObj);
             canvas.requestRenderAll();
-            syncCanvasToStore();
+            if (syncToStore) {
+              syncCanvasToStore();
+            }
           } catch (e) {
             console.warn('Failed to commit pen path:', e);
           }
@@ -586,6 +595,46 @@ export const CanvasEditor: React.FC = React.memo(() => {
     },
     [penMode, strokeColor, strokeWidth, fillColor, strokeCap, strokeJoin, activeTool, renderOverlay, syncCanvasToStore]
   );
+
+  // Synchronously flushes the current canvas artwork (including open pen paths) into a specific glyph's state & history
+  const flushCanvasToGlyph = useCallback(
+    (targetUnicode: string) => {
+      const canvas = fabricCanvasRef.current;
+      if (!canvas) return;
+
+      // 1. Commit in-progress pen path (even 1 anchor point) to canvas WITHOUT calling syncCanvasToStore
+      if (penNodesRef.current.length >= 1) {
+        commitPenPath(false, false);
+      } else {
+        penNodesRef.current = [];
+      }
+
+      // 2. Discard selection so any active transforms/drags are committed
+      canvas.discardActiveObject();
+      clearNodeEditing();
+
+      // 3. Clear any pending debounce timer
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+
+      // 4. Serialize all objects currently on canvas
+      const pendingPaths = serializeCanvasPaths(canvas);
+
+      // 5. Update targetUnicode directly in glyphStore with an independent history frame
+      useGlyphStore.getState().updateGlyphPaths(targetUnicode, pendingPaths, true);
+    },
+    [commitPenPath, clearNodeEditing]
+  );
+
+  // Register the flusher with glyphStore so that switching glyphs automatically flushes the outgoing glyph BEFORE activeUnicode changes
+  useEffect(() => {
+    registerCanvasFlusher(flushCanvasToGlyph);
+    return () => {
+      registerCanvasFlusher(null);
+    };
+  }, [flushCanvasToGlyph]);
 
   // Global Keyboard Shortcuts (Ctrl+A, Ctrl+Del, Delete, Backspace, Esc, Enter, Undo, Redo, Tools)
   useEffect(() => {
@@ -1403,8 +1452,10 @@ export const CanvasEditor: React.FC = React.memo(() => {
       }
     });
 
-    // Global pointerup / mouseup listener to cleanly end drags outside the canvas
+    // Global pointerup / mouseup / pointercancel listener to cleanly end drags outside the canvas
     const handleGlobalWindowPointerUp = () => {
+      stopPanRef.current?.();
+
       if (!isMouseDownRef.current) return;
       isMouseDown = false;
       isMouseDownRef.current = false;
@@ -1441,12 +1492,14 @@ export const CanvasEditor: React.FC = React.memo(() => {
     };
 
     window.addEventListener('pointerup', handleGlobalWindowPointerUp);
+    window.addEventListener('pointercancel', handleGlobalWindowPointerUp);
     window.addEventListener('mouseup', handleGlobalWindowPointerUp);
 
     fabricCanvasRef.current = canvas;
 
     return () => {
       window.removeEventListener('pointerup', handleGlobalWindowPointerUp);
+      window.removeEventListener('pointercancel', handleGlobalWindowPointerUp);
       window.removeEventListener('mouseup', handleGlobalWindowPointerUp);
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
       if (upperEl) upperEl.removeEventListener('contextmenu', handleCanvasContextMenu);
@@ -1473,6 +1526,26 @@ export const CanvasEditor: React.FC = React.memo(() => {
 
     if (activeTool !== 'pen' && penNodesRef.current.length > 0) {
       commitPenPath(false);
+    }
+
+    const isPanModifierActive = isSpaceHeld || isSpacePressedRef.current || activeTool === 'pan';
+
+    // While space-drag or pan modifier is held, keep canvas objects strictly non-interactive regardless of tool changes
+    if (isPanModifierActive) {
+      canvas.selection = false;
+      canvas.isDrawingMode = false;
+      canvas.defaultCursor = isPanning ? 'grabbing' : 'grab';
+      canvas.hoverCursor = isPanning ? 'grabbing' : 'grab';
+      if (canvas.upperCanvasEl) {
+        canvas.upperCanvasEl.style.cursor = isPanning ? 'grabbing' : 'grab';
+      }
+      canvas.forEachObject((obj: FabricObject) => {
+        obj.selectable = false;
+        obj.evented = false;
+      });
+      canvas.requestRenderAll();
+      renderOverlay();
+      return;
     }
 
     if (activeTool === 'select') {
@@ -1562,6 +1635,8 @@ export const CanvasEditor: React.FC = React.memo(() => {
     strokeCap,
     strokeJoin,
     smoothing,
+    isSpaceHeld,
+    isPanning,
     commitPenPath,
     clearNodeEditing,
     loadPathForNodeEditing,
@@ -1630,29 +1705,9 @@ export const CanvasEditor: React.FC = React.memo(() => {
 
     const isGlyphSwitch = prevUnicodeRef.current !== activeUnicode;
 
-    // If switching between different Unicode glyphs, synchronously flush pending strokes for previous glyph first
+    // If switching between different Unicode glyphs, synchronously flush pending strokes for previous glyph first (safety fallback)
     if (isGlyphSwitch && prevUnicodeRef.current) {
-      const prevCode = prevUnicodeRef.current;
-
-      // 1. Commit in-progress pen path if >= 2 nodes
-      if (penNodesRef.current.length >= 2) {
-        commitPenPath(false);
-      } else {
-        penNodesRef.current = [];
-      }
-
-      // 2. Discard selection so any active transforms are committed to object attributes
-      canvas.discardActiveObject();
-      clearNodeEditing();
-
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-        debounceTimerRef.current = null;
-      }
-
-      // 3. Serialize and commit to previous glyph's paths AND per-glyph undo history
-      const pendingPaths = serializeCanvasPaths(canvas);
-      useGlyphStore.getState().updateGlyphPaths(prevCode, pendingPaths, true);
+      flushCanvasToGlyph(prevUnicodeRef.current);
     }
     prevUnicodeRef.current = activeUnicode;
 
@@ -1716,7 +1771,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
     currentGlyph,
     activeTool,
     strokeColor,
-    commitPenPath,
+    flushCanvasToGlyph,
     clearNodeEditing,
     renderOverlay,
   ]);
