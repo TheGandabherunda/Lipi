@@ -6,11 +6,23 @@ export function isTypingInInputElement(e: KeyboardEvent): boolean {
   const target = e.target as HTMLElement | null;
   if (!target) return false;
   const tag = target.tagName;
-  return (
+  if (
     tag === 'INPUT' ||
     tag === 'TEXTAREA' ||
     tag === 'SELECT' ||
-    Boolean(target.isContentEditable) ||
+    Boolean(target.isContentEditable)
+  ) {
+    return true;
+  }
+  if (typeof target.closest === 'function') {
+    if (
+      target.closest('input, textarea, select, [contenteditable="true"]') ||
+      target.closest('[role="textbox"], [role="combobox"]')
+    ) {
+      return true;
+    }
+  }
+  return (
     target.getAttribute('role') === 'textbox' ||
     target.getAttribute('role') === 'combobox'
   );

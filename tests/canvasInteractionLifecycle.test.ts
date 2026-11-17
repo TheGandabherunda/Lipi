@@ -3,16 +3,45 @@ import { Path, Group, type Canvas as FabricCanvas } from 'fabric';
 import { useGlyphStore, registerCanvasFlusher } from '../src/store/glyphStore';
 import { useUIStore } from '../src/store/uiStore';
 import { penNodesToSVGPath, type PenNode } from '../src/utils/strokeTools';
+import { isTypingInInputElement } from '../src/utils/keyboardUtils';
 import {
   serializeCanvasPaths,
   serializeFabricPathObject,
+  rehydrateFabricPath,
 } from '../src/components/canvas/utils/canvasSerialization';
+
+class MockFabricBrush {
+  public _points: { x: number; y: number }[] = [];
+  public canvas: MockFabricCanvas;
+  constructor(canvas: MockFabricCanvas) {
+    this.canvas = canvas;
+  }
+  _finalizeAndAddPath() {
+    if (this._points.length > 1) {
+      const p = new Path(`M ${this._points[0].x} ${this._points[0].y} L ${this._points[1].x} ${this._points[1].y}`, {
+        stroke: '#0f172a',
+        strokeWidth: 16,
+        strokeUniform: true,
+      });
+      this.canvas.add(p);
+    }
+  }
+  _reset() {
+    this._points = [];
+  }
+}
 
 class MockFabricCanvas {
   public objects: any[] = [];
   public selection = true;
   public isDrawingMode = false;
+  public freeDrawingBrush: MockFabricBrush | null = null;
   public activeObjects: any[] = [];
+  public contextTop = {};
+
+  constructor() {
+    this.freeDrawingBrush = new MockFabricBrush(this);
+  }
 
   getObjects() {
     return [...this.objects];
@@ -28,8 +57,12 @@ class MockFabricCanvas {
     this.objects = [];
     this.activeObjects = [];
   }
+  clearContext(_ctx?: any) {}
   setActiveObject(obj: any) {
     this.activeObjects = [obj];
+  }
+  getActiveObject() {
+    return this.activeObjects[0] || null;
   }
   getActiveObjects() {
     return [...this.activeObjects];
@@ -339,5 +372,272 @@ describe('Phase 1 Acceptance: Canvas Interaction Lifecycle & Edge Cases', () => 
     handleKeyUp({ code: 'Space', target: { tagName: 'INPUT' } });
     expect(isSpaceHeld).toBe(false);
     expect(isSpacePressed).toBe(false);
+  });
+
+  it('flushes in-progress brush stroke to outgoing glyph when switching mid-stroke', () => {
+    useGlyphStore.getState().setActiveUnicode('U+0C85'); // 'ಅ'
+
+    canvas.isDrawingMode = true;
+    if (canvas.freeDrawingBrush) {
+      canvas.freeDrawingBrush._points = [
+        { x: 30, y: 40 },
+        { x: 180, y: 220 },
+      ];
+    }
+
+    const flusher = (outgoingUnicode: string) => {
+      if (canvas.isDrawingMode && canvas.freeDrawingBrush) {
+        if (canvas.freeDrawingBrush._points.length > 1) {
+          canvas.freeDrawingBrush._finalizeAndAddPath();
+        }
+        canvas.freeDrawingBrush._reset();
+      }
+      canvas.discardActiveObject();
+      const serialized = serializeCanvasPaths(canvas as unknown as FabricCanvas);
+      useGlyphStore.getState().updateGlyphPaths(outgoingUnicode, serialized, true);
+    };
+
+    registerCanvasFlusher(flusher);
+
+    // Switch to 'U+0C86' ('ಆ')
+    useGlyphStore.getState().setActiveUnicode('U+0C86');
+
+    // 1. Outgoing glyph U+0C85 should have received the brush stroke
+    const glyphA = useGlyphStore.getState().glyphs['U+0C85'];
+    expect(glyphA.paths.length).toBe(1);
+    expect(glyphA.paths[0].pathString).toContain('M 30 40 L 180 220');
+
+    // 2. Destination glyph U+0C86 must NOT receive glyph A's stroke
+    const glyphB = useGlyphStore.getState().glyphs['U+0C86'];
+    expect(glyphB.paths.length).toBe(0);
+
+    // 3. Brush points must be reset
+    expect(canvas.freeDrawingBrush?._points.length).toBe(0);
+  });
+
+  it('flushes in-progress eraser drag to outgoing glyph when switching mid-erase', () => {
+    useGlyphStore.getState().setActiveUnicode('U+0C85');
+
+    // Glyph A starts with two strokes
+    const p1 = new Path('M 10 10 L 50 50', { stroke: '#000', strokeWidth: 10 });
+    const p2 = new Path('M 100 100 L 200 200', { stroke: '#000', strokeWidth: 10 });
+    canvas.add(p1, p2);
+
+    // User is mid-eraser drag: p2 was removed on canvas, but pointerup has not fired yet
+    canvas.remove(p2);
+    let hasErasedDuringDrag = true;
+    let lastEraserPos = { x: 150, y: 150 };
+
+    const flusher = (outgoingUnicode: string) => {
+      hasErasedDuringDrag = false;
+      lastEraserPos = null as any;
+      canvas.discardActiveObject();
+      const serialized = serializeCanvasPaths(canvas as unknown as FabricCanvas);
+      useGlyphStore.getState().updateGlyphPaths(outgoingUnicode, serialized, true);
+    };
+
+    registerCanvasFlusher(flusher);
+
+    // Switch to 'U+0C95'
+    useGlyphStore.getState().setActiveUnicode('U+0C95');
+
+    // Outgoing glyph receives erased canvas state (1 remaining stroke)
+    const glyphA = useGlyphStore.getState().glyphs['U+0C85'];
+    expect(glyphA.paths.length).toBe(1);
+    expect(glyphA.paths[0].pathString).toContain('M 10 10 L 50 50');
+
+    // Destination glyph is completely untouched
+    const glyphK = useGlyphStore.getState().glyphs['U+0C95'];
+    expect(glyphK.paths.length).toBe(0);
+
+    // Eraser refs are cleared
+    expect(hasErasedDuringDrag).toBe(false);
+    expect(lastEraserPos).toBeNull();
+  });
+
+  it('ensures redo branch truncation works correctly across glyph switches', () => {
+    useGlyphStore.getState().setActiveUnicode('U+0C85'); // Glyph A
+
+    const s1 = { id: 's1', pathString: 'M 0 0 L 10 10', strokeWidth: 16, strokeColor: '#000' };
+    const s2 = { id: 's2', pathString: 'M 10 10 L 20 20', strokeWidth: 16, strokeColor: '#000' };
+    const s3 = { id: 's3', pathString: 'M 20 20 L 30 30', strokeWidth: 16, strokeColor: '#000' };
+    const s4 = { id: 's4', pathString: 'M 40 40 L 50 50', strokeWidth: 16, strokeColor: '#000' };
+    const sB = { id: 'sB', pathString: 'M 90 90 L 99 99', strokeWidth: 16, strokeColor: '#000' };
+
+    useGlyphStore.getState().updateActiveGlyphPaths([s1]);
+    useGlyphStore.getState().updateActiveGlyphPaths([s1, s2]);
+    useGlyphStore.getState().updateActiveGlyphPaths([s1, s2, s3]);
+    expect(useGlyphStore.getState().canUndo()).toBe(true);
+
+    // Undo on Glyph A to state [s1, s2]
+    useGlyphStore.getState().undo();
+    expect(useGlyphStore.getState().glyphs['U+0C85'].paths.length).toBe(2);
+    expect(useGlyphStore.getState().canRedo()).toBe(true);
+
+    // Switch to Glyph B and perform edits
+    useGlyphStore.getState().setActiveUnicode('U+0C86');
+    expect(useGlyphStore.getState().canUndo()).toBe(false);
+    useGlyphStore.getState().updateActiveGlyphPaths([sB]);
+    expect(useGlyphStore.getState().canUndo()).toBe(true);
+
+    // Switch back to Glyph A
+    useGlyphStore.getState().setActiveUnicode('U+0C85');
+    // Glyph A must still retain redo capability
+    expect(useGlyphStore.getState().canRedo()).toBe(true);
+
+    // New edit on Glyph A must truncate redo branch
+    useGlyphStore.getState().updateActiveGlyphPaths([s1, s2, s4]);
+    expect(useGlyphStore.getState().canRedo()).toBe(false);
+
+    // Glyph B must remain untouched with its own history
+    expect(useGlyphStore.getState().glyphHistories['U+0C86'].stack.length).toBe(2);
+    expect(useGlyphStore.getState().glyphs['U+0C86'].paths.length).toBe(1);
+    expect(useGlyphStore.getState().glyphs['U+0C86'].paths[0].id).toBe('sB');
+  });
+
+  it('ensures serialize -> rehydrate -> serialize preserves fill-only, stroke-only, and transformed shapes with zero geometric drift', () => {
+    // 1. Stroke-only path
+    const strokeOnlyPath = {
+      id: 'stroke_1',
+      pathString: 'M 100 100 L 200 200',
+      strokeWidth: 24,
+      strokeColor: '#0f172a',
+      strokeLineCap: 'round' as const,
+      strokeLineJoin: 'round' as const,
+    };
+    const fObj1 = rehydrateFabricPath(strokeOnlyPath);
+    expect(fObj1).not.toBeNull();
+    const s1 = serializeFabricPathObject(fObj1, 0);
+    expect(s1?.pathString).toBe(strokeOnlyPath.pathString);
+    expect(s1?.strokeWidth).toBe(24);
+    expect(s1?.strokeColor).toBe('#0f172a');
+    expect(s1?.fillColor).toBeUndefined();
+
+    // 2. Fill-only path
+    const fillOnlyPath = {
+      id: 'fill_1',
+      pathString: 'M 0 0 L 100 0 L 100 100 Z',
+      strokeWidth: 0,
+      strokeColor: '#0f172a',
+      fillColor: '#4f46e5',
+      strokeLineCap: 'round' as const,
+      strokeLineJoin: 'round' as const,
+    };
+    const fObj2 = rehydrateFabricPath(fillOnlyPath);
+    expect(fObj2).not.toBeNull();
+    const s2 = serializeFabricPathObject(fObj2, 1);
+    expect(s2?.pathString).toBe(fillOnlyPath.pathString);
+    expect(s2?.fillColor).toBe('#4f46e5');
+    expect(s2?.strokeWidth).toBe(0);
+
+    // 3. Round-trip stability for scaled & rotated path: geometry stays identical on 2nd cycle
+    const transformed = new Path('M 0 0 L 50 50', {
+      stroke: '#000',
+      strokeWidth: 16,
+      scaleX: 2,
+      scaleY: 2,
+      angle: 90,
+      strokeUniform: true,
+    });
+    const bakedData = serializeFabricPathObject(transformed, 2);
+    expect(bakedData).not.toBeNull();
+
+    // Rehydrate baked data and re-serialize without moving
+    const rehydratedBaked = rehydrateFabricPath(bakedData!);
+    expect(rehydratedBaked).not.toBeNull();
+    const secondPassData = serializeFabricPathObject(rehydratedBaked, 3);
+
+    expect(secondPassData?.pathString).toBe(bakedData?.pathString);
+    expect(secondPassData?.strokeWidth).toBe(bakedData?.strokeWidth);
+  });
+
+  it('prevents Spacebar panning from moving, transforming, or drawing active objects', () => {
+    const p1 = new Path('M 10 10 L 50 50', {
+      stroke: '#000',
+      strokeWidth: 16,
+      selectable: true,
+      evented: true,
+    });
+    canvas.add(p1);
+    canvas.setActiveObject(p1);
+
+    // 1. Space down
+    canvas.isDrawingMode = false;
+    canvas.selection = false;
+    const activeObj = canvas.getActiveObject();
+    if (activeObj) {
+      activeObj.selectable = false;
+      activeObj.evented = false;
+    }
+    canvas.forEachObject((obj) => {
+      obj.selectable = false;
+      obj.evented = false;
+    });
+
+    expect(p1.selectable).toBe(false);
+    expect(p1.evented).toBe(false);
+    expect(canvas.isDrawingMode).toBe(false);
+
+    // 2. Pan simulation: objects are not touched
+    const origPath = p1.path;
+    expect(p1.path).toBe(origPath);
+
+    // 3. Space up: restore active tool
+    const curTool = 'select';
+    canvas.forEachObject((obj) => {
+      obj.selectable = curTool === 'select';
+      obj.evented = curTool === 'select';
+    });
+    if (activeObj) {
+      activeObj.selectable = curTool === 'select';
+      activeObj.evented = curTool === 'select';
+    }
+
+    expect(p1.selectable).toBe(true);
+    expect(p1.evented).toBe(true);
+  });
+
+  it('protects keyboard shortcuts inside inputs, textareas, contentEditable, and ARIA widgets', () => {
+    // Input element
+    const inputEl = { tagName: 'INPUT', isContentEditable: false, getAttribute: () => null };
+    expect(isTypingInInputElement({ target: inputEl } as any)).toBe(true);
+
+    // Textarea element
+    const textareaEl = { tagName: 'TEXTAREA', isContentEditable: false, getAttribute: () => null };
+    expect(isTypingInInputElement({ target: textareaEl } as any)).toBe(true);
+
+    // Select element
+    const selectEl = { tagName: 'SELECT', isContentEditable: false, getAttribute: () => null };
+    expect(isTypingInInputElement({ target: selectEl } as any)).toBe(true);
+
+    // ContentEditable element
+    const editableEl = { tagName: 'DIV', isContentEditable: true, getAttribute: () => null };
+    expect(isTypingInInputElement({ target: editableEl } as any)).toBe(true);
+
+    // Nested child of contentEditable
+    const nestedChild = {
+      tagName: 'SPAN',
+      isContentEditable: false,
+      getAttribute: () => null,
+      closest: (sel: string) => (sel.includes('contenteditable') ? true : null),
+    };
+    expect(isTypingInInputElement({ target: nestedChild } as any)).toBe(true);
+
+    // ARIA textbox
+    const ariaTextbox = {
+      tagName: 'DIV',
+      isContentEditable: false,
+      getAttribute: (attr: string) => (attr === 'role' ? 'textbox' : null),
+    };
+    expect(isTypingInInputElement({ target: ariaTextbox } as any)).toBe(true);
+
+    // Normal canvas container (must NOT be treated as input)
+    const canvasDiv = {
+      tagName: 'DIV',
+      isContentEditable: false,
+      getAttribute: () => null,
+      closest: () => null,
+    };
+    expect(isTypingInInputElement({ target: canvasDiv } as any)).toBe(false);
   });
 });

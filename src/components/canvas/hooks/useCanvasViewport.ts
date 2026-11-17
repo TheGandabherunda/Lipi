@@ -132,6 +132,11 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
           // Disable drawing mode, marquee selection, and object interactions immediately
           canvas.isDrawingMode = false;
           canvas.selection = false;
+          const activeObj = canvas.getActiveObject();
+          if (activeObj) {
+            activeObj.selectable = false;
+            activeObj.evented = false;
+          }
           canvas.forEachObject((obj) => {
             obj.selectable = false;
             obj.evented = false;
@@ -157,6 +162,11 @@ export function useCanvasViewport({ containerRef, fabricCanvasRef }: UseCanvasVi
             obj.selectable = currentTool === 'select';
             obj.evented = currentTool === 'select' || currentTool === 'direct-select' || currentTool === 'eraser';
           });
+          const activeObj = canvas.getActiveObject();
+          if (activeObj) {
+            activeObj.selectable = currentTool === 'select';
+            activeObj.evented = currentTool === 'select';
+          }
           if (!isPanningRef.current && canvas.upperCanvasEl) {
             canvas.upperCanvasEl.style.cursor =
               currentTool === 'brush' || currentTool === 'eraser'

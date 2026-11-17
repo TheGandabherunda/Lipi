@@ -11,9 +11,10 @@ export function fabricSegmentsToPathString(segments: any[]): string {
     .map((seg) => {
       const command = seg[0];
       const coords = seg.slice(1).map((n: number) => Math.round(n * 100) / 100).join(' ');
-      return `${command} ${coords}`;
+      return coords ? `${command} ${coords}` : `${command}`;
     })
-    .join(' ');
+    .join(' ')
+    .trim();
 }
 
 /**

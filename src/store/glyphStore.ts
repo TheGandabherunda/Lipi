@@ -475,6 +475,7 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
     };
 
     set({
+      history: activeHistory.stack.map((entry) => cloneVectorPaths(entry)),
       historyIndex: newIndex,
       glyphHistories: {
         ...glyphHistories,
@@ -508,6 +509,7 @@ export const useGlyphStore = create<GlyphStoreState>((set, get) => ({
     };
 
     set({
+      history: activeHistory.stack.map((entry) => cloneVectorPaths(entry)),
       historyIndex: newIndex,
       glyphHistories: {
         ...glyphHistories,

@@ -90,6 +90,7 @@ export function useCanvasClipboard({
           fill: hasFill ? p.fillColor : undefined,
           strokeLineCap: p.strokeLineCap || 'round',
           strokeLineJoin: p.strokeLineJoin || 'round',
+          strokeUniform: true,
           selectable: activeTool === 'select',
           evented: true,
         });
@@ -143,6 +144,7 @@ export function useCanvasClipboard({
           fill: serialized.fillColor,
           strokeLineCap: serialized.strokeLineCap,
           strokeLineJoin: serialized.strokeLineJoin,
+          strokeUniform: true,
           selectable: true,
           evented: true,
         });

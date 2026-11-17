@@ -54,6 +54,8 @@ export const CanvasEditor: React.FC = React.memo(() => {
   const isSyncingRef = useRef<boolean>(false);
   const isInternalUpdateRef = useRef<boolean>(false);
   const isMouseDownRef = useRef<boolean>(false);
+  const isFlushInProgressRef = useRef<boolean>(false);
+  const lastFlushedUnicodeRef = useRef<string | null>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Pen tool & Eraser interactive state refs
@@ -210,7 +212,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
   // Synchronous sync to store: creates an immediate, atomic history snapshot
   const syncCanvasToStore = useCallback(
     (recordHistory = true, customPaths?: VectorPathData[]) => {
-      if (isSyncingRef.current) return;
+      if (isSyncingRef.current || isFlushInProgressRef.current) return;
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
         debounceTimerRef.current = null;
@@ -225,6 +227,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
 
   // Sync to store helper (immediately synchronizes completed actions)
   const syncToStoreDebounced = useCallback(() => {
+    if (isFlushInProgressRef.current) return;
     syncCanvasToStore(true);
   }, [syncCanvasToStore]);
 
@@ -596,34 +599,66 @@ export const CanvasEditor: React.FC = React.memo(() => {
     [penMode, strokeColor, strokeWidth, fillColor, strokeCap, strokeJoin, activeTool, renderOverlay, syncCanvasToStore]
   );
 
-  // Synchronously flushes the current canvas artwork (including open pen paths) into a specific glyph's state & history
+  // Synchronously flushes the current canvas artwork (including open pen paths, brush strokes, transforms) into a specific glyph's state & history
   const flushCanvasToGlyph = useCallback(
     (targetUnicode: string) => {
       const canvas = fabricCanvasRef.current;
       if (!canvas) return;
 
-      // 1. Commit in-progress pen path (even 1 anchor point) to canvas WITHOUT calling syncCanvasToStore
-      if (penNodesRef.current.length >= 1) {
-        commitPenPath(false, false);
-      } else {
-        penNodesRef.current = [];
+      isFlushInProgressRef.current = true;
+
+      try {
+        // 1. Commit in-progress pen path (even 1 anchor point) to canvas WITHOUT calling syncCanvasToStore
+        if (penNodesRef.current.length >= 1) {
+          commitPenPath(false, false);
+        } else {
+          penNodesRef.current = [];
+        }
+
+        // 2. Finalize in-progress brush stroke if user was mid-stroke
+        if (canvas.isDrawingMode && canvas.freeDrawingBrush) {
+          const brush = canvas.freeDrawingBrush as any;
+          if (brush._points && brush._points.length > 1) {
+            try {
+              brush._finalizeAndAddPath?.();
+            } catch (e) {
+              console.warn('Failed to finalize brush stroke before flush:', e);
+            }
+          }
+          brush._reset?.();
+          canvas.clearContext?.(canvas.contextTop);
+        }
+
+        // 3. Clear active drag references
+        activeDragIndexRef.current = null;
+        penDragStartPosRef.current = null;
+        lastEraserPosRef.current = null;
+        hasErasedDuringDragRef.current = false;
+        activeNodeDragRef.current = null;
+        marqueeBoxRef.current = null;
+        hoveredNodeInfoRef.current = null;
+        hoveredSegmentRef.current = null;
+        isMouseDownRef.current = false;
+
+        // 4. Discard selection so any active transforms/drags are committed
+        canvas.discardActiveObject();
+        clearNodeEditing();
+
+        // 5. Clear any pending debounce timer
+        if (debounceTimerRef.current) {
+          clearTimeout(debounceTimerRef.current);
+          debounceTimerRef.current = null;
+        }
+
+        // 6. Serialize all objects currently on canvas
+        const pendingPaths = serializeCanvasPaths(canvas);
+
+        // 7. Update targetUnicode directly in glyphStore with an independent history frame
+        useGlyphStore.getState().updateGlyphPaths(targetUnicode, pendingPaths, true);
+        lastFlushedUnicodeRef.current = targetUnicode;
+      } finally {
+        isFlushInProgressRef.current = false;
       }
-
-      // 2. Discard selection so any active transforms/drags are committed
-      canvas.discardActiveObject();
-      clearNodeEditing();
-
-      // 3. Clear any pending debounce timer
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-        debounceTimerRef.current = null;
-      }
-
-      // 4. Serialize all objects currently on canvas
-      const pendingPaths = serializeCanvasPaths(canvas);
-
-      // 5. Update targetUnicode directly in glyphStore with an independent history frame
-      useGlyphStore.getState().updateGlyphPaths(targetUnicode, pendingPaths, true);
     },
     [commitPenPath, clearNodeEditing]
   );
@@ -804,8 +839,6 @@ export const CanvasEditor: React.FC = React.memo(() => {
     brush.decimate = Math.max(0.5, (smoothing / 100) * 8);
     canvas.freeDrawingBrush = brush;
 
-    let isMouseDown = false;
-
     // Angle detection when strokes/objects are selected or rotated
     const updateAngle = () => {
       const activeObj = canvas.getActiveObject();
@@ -907,7 +940,6 @@ export const CanvasEditor: React.FC = React.memo(() => {
         startPan(eAny?.clientX ?? 0, eAny?.clientY ?? 0);
         return;
       }
-      isMouseDown = true;
       isMouseDownRef.current = true;
 
       if (tool === 'direct-select') {
@@ -1162,7 +1194,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
         }
 
         // Dragging marquee selection box
-        if (marqueeBoxRef.current && isMouseDown) {
+        if (marqueeBoxRef.current && isMouseDownRef.current) {
           marqueeBoxRef.current.current = pointer;
           const { start, current } = marqueeBoxRef.current;
           const minX = Math.min(start.x, current.x);
@@ -1213,7 +1245,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
         if (
           curPenMode === 'rounded' &&
           activeDragIndexRef.current !== null &&
-          isMouseDown &&
+          isMouseDownRef.current &&
           penDragStartPosRef.current
         ) {
           const startPos = penDragStartPosRef.current;
@@ -1273,7 +1305,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
         hoverPosRef.current = { x: pointer.x, y: pointer.y };
         renderOverlay();
 
-        if (isMouseDown && lastEraserPosRef.current) {
+        if (isMouseDownRef.current && lastEraserPosRef.current) {
           const radius = useUIStore.getState().eraserSize / 2;
           const prev = lastEraserPosRef.current;
           if (eraseStrokesAlongSegment(canvas, prev, pointer, radius)) {
@@ -1287,7 +1319,6 @@ export const CanvasEditor: React.FC = React.memo(() => {
     canvas.on('mouse:up', () => {
       const tool = useUIStore.getState().activeTool;
       const curPenMode = useUIStore.getState().penMode;
-      isMouseDown = false;
       isMouseDownRef.current = false;
       lastEraserPosRef.current = null;
 
@@ -1438,6 +1469,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
                 fill: undefined,
                 strokeLineCap: curCap,
                 strokeLineJoin: curJoin,
+                strokeUniform: true,
                 selectable: true,
                 evented: true,
               });
@@ -1452,16 +1484,28 @@ export const CanvasEditor: React.FC = React.memo(() => {
       }
     });
 
-    // Global pointerup / mouseup / pointercancel listener to cleanly end drags outside the canvas
+    // Global pointerup / mouseup / pointercancel / blur listener to cleanly end drags outside the canvas
     const handleGlobalWindowPointerUp = () => {
       stopPanRef.current?.();
 
       if (!isMouseDownRef.current) return;
-      isMouseDown = false;
       isMouseDownRef.current = false;
 
       const tool = useUIStore.getState().activeTool;
       const curPenMode = useUIStore.getState().penMode;
+
+      if (tool === 'brush' && canvas.isDrawingMode && canvas.freeDrawingBrush) {
+        const brush = canvas.freeDrawingBrush as any;
+        if (brush._points && brush._points.length > 1) {
+          try {
+            brush._finalizeAndAddPath?.();
+          } catch (e) {
+            console.warn('Failed to finalize brush on global pointerup:', e);
+          }
+        }
+        brush._reset?.();
+        canvas.clearContext?.(canvas.contextTop);
+      }
 
       if (tool === 'direct-select') {
         if (activeNodeDragRef.current) {
@@ -1488,12 +1532,20 @@ export const CanvasEditor: React.FC = React.memo(() => {
         activeDragIndexRef.current = null;
         penDragStartPosRef.current = null;
         renderOverlay();
+      } else if (tool === 'select') {
+        if ((canvas as any)._currentTransform) {
+          try {
+            (canvas as any)._onMouseUp?.(new MouseEvent('mouseup') as any);
+          } catch {}
+          syncCanvasToStore();
+        }
       }
     };
 
     window.addEventListener('pointerup', handleGlobalWindowPointerUp);
     window.addEventListener('pointercancel', handleGlobalWindowPointerUp);
     window.addEventListener('mouseup', handleGlobalWindowPointerUp);
+    window.addEventListener('blur', handleGlobalWindowPointerUp);
 
     fabricCanvasRef.current = canvas;
 
@@ -1501,6 +1553,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
       window.removeEventListener('pointerup', handleGlobalWindowPointerUp);
       window.removeEventListener('pointercancel', handleGlobalWindowPointerUp);
       window.removeEventListener('mouseup', handleGlobalWindowPointerUp);
+      window.removeEventListener('blur', handleGlobalWindowPointerUp);
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
       if (upperEl) upperEl.removeEventListener('contextmenu', handleCanvasContextMenu);
       canvas.off('contextmenu', handleFabricContextMenu);
@@ -1527,6 +1580,16 @@ export const CanvasEditor: React.FC = React.memo(() => {
     if (activeTool !== 'pen' && penNodesRef.current.length > 0) {
       commitPenPath(false);
     }
+
+    if (isMouseDownRef.current) {
+      if (activeNodeDragRef.current) syncCanvasToStore();
+      if (hasErasedDuringDragRef.current) syncCanvasToStore();
+      isMouseDownRef.current = false;
+    }
+    activeNodeDragRef.current = null;
+    marqueeBoxRef.current = null;
+    lastEraserPosRef.current = null;
+    hasErasedDuringDragRef.current = false;
 
     const isPanModifierActive = isSpaceHeld || isSpacePressedRef.current || activeTool === 'pan';
 
@@ -1682,14 +1745,31 @@ export const CanvasEditor: React.FC = React.memo(() => {
   // Listen for project reset / load to avoid stale canvas flushing
   useEffect(() => {
     const handleProjectLoaded = () => {
-      prevUnicodeRef.current = useGlyphStore.getState().activeUnicode;
+      const active = useGlyphStore.getState().activeUnicode;
+      prevUnicodeRef.current = active;
+      lastFlushedUnicodeRef.current = active;
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
         debounceTimerRef.current = null;
       }
+      isInternalUpdateRef.current = false;
+      isMouseDownRef.current = false;
       penNodesRef.current = [];
+      activeDragIndexRef.current = null;
+      penDragStartPosRef.current = null;
+      hoverPosRef.current = null;
+      lastEraserPosRef.current = null;
+      hasErasedDuringDragRef.current = false;
+      activeNodeDragRef.current = null;
+      marqueeBoxRef.current = null;
+      hoveredNodeInfoRef.current = null;
+      hoveredSegmentRef.current = null;
+      stopPanRef.current?.();
+
       const canvas = fabricCanvasRef.current;
       if (canvas) {
+        (canvas.freeDrawingBrush as any)?._reset?.();
+        canvas.clearContext?.(canvas.contextTop);
         canvas.discardActiveObject();
         clearNodeEditing();
       }
@@ -1707,7 +1787,9 @@ export const CanvasEditor: React.FC = React.memo(() => {
 
     // If switching between different Unicode glyphs, synchronously flush pending strokes for previous glyph first (safety fallback)
     if (isGlyphSwitch && prevUnicodeRef.current) {
-      flushCanvasToGlyph(prevUnicodeRef.current);
+      if (lastFlushedUnicodeRef.current !== prevUnicodeRef.current) {
+        flushCanvasToGlyph(prevUnicodeRef.current);
+      }
     }
     prevUnicodeRef.current = activeUnicode;
 
@@ -1729,6 +1811,7 @@ export const CanvasEditor: React.FC = React.memo(() => {
     clearNodeEditing();
     penNodesRef.current = [];
     activeDragIndexRef.current = null;
+    penDragStartPosRef.current = null;
     hoverPosRef.current = null;
     lastEraserPosRef.current = null;
     marqueeBoxRef.current = null;
@@ -1737,6 +1820,8 @@ export const CanvasEditor: React.FC = React.memo(() => {
     hoveredSegmentRef.current = null;
     isMouseDownRef.current = false;
     hasErasedDuringDragRef.current = false;
+    (canvas.freeDrawingBrush as any)?._reset?.();
+    canvas.clearContext?.(canvas.contextTop);
 
     isSyncingRef.current = true;
     canvas.clear();

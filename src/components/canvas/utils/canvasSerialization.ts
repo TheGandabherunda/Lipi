@@ -93,18 +93,26 @@ export function serializeFabricPathObject(obj: any, idx = 0): VectorPathData | n
 }
 
 /**
- * Serializes all paths currently placed on the Fabric canvas.
+ * Serializes all paths currently placed on the Fabric canvas,
+ * recursively traversing any Group objects so grouped strokes are preserved.
  */
 export function serializeCanvasPaths(canvas: Canvas | null): VectorPathData[] {
   if (!canvas) return [];
   const objects = canvas.getObjects();
   const result: VectorPathData[] = [];
 
-  objects.forEach((obj, idx) => {
-    const serialized = serializeFabricPathObject(obj, idx);
-    if (serialized) result.push(serialized);
-  });
+  function collectPaths(objs: any[]) {
+    objs.forEach((obj) => {
+      if (obj instanceof Path && obj.path) {
+        const serialized = serializeFabricPathObject(obj, result.length);
+        if (serialized) result.push(serialized);
+      } else if (obj && typeof obj.getObjects === 'function') {
+        collectPaths(obj.getObjects());
+      }
+    });
+  }
 
+  collectPaths(objects);
   return result;
 }
 
